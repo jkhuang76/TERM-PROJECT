@@ -65,20 +65,21 @@ class Beat(object):
         return f"Beat at {self.x}, {self.y} with radius {self.r}"
 
 class Surface(object): #surfaces - "ground", platforms, rectangles
-    def __init__(self, x, y, size, isRectangle):
+    def __init__(self, x, y, width, height):
         self.x = x 
         self.y = y 
-        self.size = size 
-        self.isRectangle = isRectangle
-    def getBounds(self):
-        if (self.isRectangle):
-            (x0,y0,x1,y1) = (self.x - self.size, self.y - self.size//2, 
-                               self.x + self.size, self.y + self.size//2)
-        else: 
-            (x0,y0,x1,y1) = (self.x - self.size, self.y - self.size, 
-                            self.x + self.size, self.y + self.size)
+        self.width = width
+        self.height = height
+    def getBounds(self,app):
+        (x0,y0,x1,y1) = (self.x - self.width - app.scrollX, self.y - self.height, 
+                               self.x + self.width - app.scrollX, self.y + self.height)
         return (x0,y0,x1,y1)
-    
+
+class Ground(Surface):
+    def getBounds(self):
+        (x0,y0,x1,y1) = (self.x - self.width , self.y - self.height, 
+                               self.x + self.width, self.y + self.height)
+        return (x0,y0,x1,y1)
 
 class Player(object): # basic player class represented by square
     DEFAULT_VELOCITY = -5
@@ -107,7 +108,10 @@ class Player(object): # basic player class represented by square
 
     def collidesWith(self,other,app):
         playerBounds = self.getBounds()
-        otherBounds = other.getBounds()
+        if (isinstance(other, Ground)):
+            otherBounds = other.getBounds()
+        else: 
+            otherBounds = other.getBounds(app)
         if (app.boundsIntersect(playerBounds, otherBounds)): 
             return True
         return False
@@ -149,7 +153,8 @@ class beatApp(App):
         self.score = 0
         self.player = Player(self.width//2, self.height//2 -20, 20)
         self.scrollX = 0 
-        self.ground = Surface(self.width//2, self.height*0.8, self.width//2, True)
+        self.ground = Ground(self.width//2, self.height*0.8, self.width//2, self.width//4)
+        self.platform = Surface(500, 220, 20, 30)
     
 
      
@@ -161,9 +166,9 @@ class beatApp(App):
         if (self.player.isJumping == True):
             self.player.jump(self)
         self.scroll()
+        self.onTop()
         self.clearScreen()
-        #self.stopMomentum()
-        #self.player.y += self.player.vy * self.counter # test of gravity
+        #self.checkCollisions()
 
     def scroll(self):
         self.scrollX += 5
@@ -171,10 +176,21 @@ class beatApp(App):
     def movePlayer(self,dx,dy):
         self.player.x += dx 
         self.player.y += dy
-        if (self.player.collidesWith(self.ground,self)):
+        if (self.player.collidesWith(self.ground    ,self)):
             self.player.x -= dx 
             self.player.y -= dy
-            
+    """        
+    def checkCollisions(self):
+        if (self.player.collidesWith(self.platform,self)):
+            self.player.y = self.platform.y - self.platform.height - self.player.size
+    """
+    def onTop(self):
+        (px0, py0, px1, py1)= self.platform.getBounds(self)
+        (Px0, Py0, Px1, Py1) = playerBounds = self.player.getBounds()
+        if (Px0 >= px0 and Px1 <= px1 and 
+            Py1 >= py0): 
+            self.player.y = self.platform.y - self.platform.height - self.player.size
+
 
     def keyPressed(self,event):
         if (event.key == "Right"):
@@ -228,10 +244,12 @@ class beatApp(App):
         font = "Solomon 16")
         canvas.create_rectangle(self.player.x - self.player.size , self.player.y - self.player.size , 
                             self.player.x + self.player.size , self.player.y + self.player.size )
-        canvas.create_rectangle(self.ground.x - self.ground.size, self.ground.y - self.ground.size//2, 
-                               self.ground.x + self.ground.size, self.ground.y + self.ground.size//2, fill = "black")
+        canvas.create_rectangle(self.ground.x - self.ground.width, self.ground.y - self.ground.height, 
+                               self.ground.x + self.ground.width, self.ground.y + self.ground.height, fill = "black")
         canvas.create_oval(self.width//2 - self.scrollX, self.height//2, 
                             self.width//2 - 10 - self.scrollX, self.height//2 - 10, fill = 'red')
+        canvas.create_rectangle(self.platform.x - self.platform.width - self.scrollX, self.platform.y - self.platform.height, 
+                               self.platform.x + self.platform.width - self.scrollX, self.platform.y + self.platform.height)
 
         
 
