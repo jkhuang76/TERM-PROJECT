@@ -45,12 +45,11 @@ def pyaudio_stream_thread(flagList):
                 stream_callback=pyaudio_callback)
 
         stream.start_stream()
-
         while stream.is_active():
             time.sleep(0.1)
-        stream.stop_stream()
-        stream.close()
-        p.terminate()
+    stream.stop_stream()
+    stream.close()
+    p.terminate()
 
 class Beat(object):
     #basic beat represented by a dot
@@ -82,14 +81,18 @@ class Surface(object): #surfaces - "ground", platforms, rectangles
     
 
 class Player(object): # basic player class represented by square
+    DEFAULT_VELOCITY = -5
+    DEFAULT_SPEED = 10
+    JUMP_ACCEL = 3
     def __init__(self, x, y, size):
         self.x = x
         self.y = y 
         self.size = size
         self.vx = 0
-        self.vy = 5  #test of gravity
+        self.vy = Player.DEFAULT_VELOCITY  #test of gravity
+        self.speed = Player.DEFAULT_SPEED
         self.isJumping = False
-        self.accY = 8
+        self.isMoving = False
     
     def changeVelocity(self, vx, vy): 
         self.vx = vx 
@@ -99,12 +102,28 @@ class Player(object): # basic player class represented by square
                             self.x + self.size, self.y + self.size)
         return (x0,y0,x1,y1)
 
+    def move(self):
+        self.x += self.speed
+
     def collidesWith(self,other,app):
         playerBounds = self.getBounds()
         otherBounds = other.getBounds()
         if (app.boundsIntersect(playerBounds, otherBounds)): 
             return True
         return False
+    def jump(self,app):
+        self.y += self.vy *Player.JUMP_ACCEL #timestarted time ended to be added
+        self.x += self.vx *Player.JUMP_ACCEL
+        if (self.vy < 0):
+            self.vy += 1
+        else:
+            self.vy = -Player.DEFAULT_VELOCITY
+            self.vy -=1 
+        if self.collidesWith(app.ground, app):
+            self.isJumping = False 
+            self.y = 250
+            self.vy = Player.DEFAULT_VELOCITY
+
     
             
 
@@ -116,14 +135,20 @@ class beatApp(App):
         return ((x2-x1)**2 + (y2-y1)**2)**0.5
     def __init__(self, width, height):
         super().__init__(width = width, height = height)
-        self.pyaudioFlag = [False]
+        print("bye")
+        self.pyaudioFlag[0] = False
     def appStarted(self):
         self.pyaudioFlag = [True]
+        global streamThread
+        streamThread = threading.Thread(target=pyaudio_stream_thread, args=(self.pyaudioFlag,))
+        #streamThread.start()
+        threads.append(streamThread)
         self.beats = beats
         self.counter = 0 
         self.timerDelay = 100
         self.score = 0
-        self.player = Player(50, self.height//2 -20, 20)
+        self.player = Player(self.width//2, self.height//2 -20, 20)
+        self.scrollX = 0 
         self.ground = Surface(self.width//2, self.height*0.8, self.width//2, True)
     
 
@@ -131,20 +156,17 @@ class beatApp(App):
     def timerFired(self):
         # go through beats and move them to the left
         self.counter += self.timerDelay
-        for beat in self.beats: 
-            beat.move(-10,0)
+        #for beat in self.beats: 
+            #beat.move(-10,0)
+        if (self.player.isJumping == True):
+            self.player.jump(self)
+        self.scroll()
         self.clearScreen()
         #self.stopMomentum()
         #self.player.y += self.player.vy * self.counter # test of gravity
 
-    def jump(self): #has to have time component
-        if (self.player.isJumping):
-            while (self.player.accY > 0): #inital upwards motion
-                self.player.y += self.player.vy 
-                self.player.accY -= 1 
-            if (self.player.collidesWith(self.ground,self)):
-                self.player.accY = 8 
-                self.player.vy = 0
+    def scroll(self):
+        self.scrollX += 5
 
     def movePlayer(self,dx,dy):
         self.player.x += dx 
@@ -152,21 +174,24 @@ class beatApp(App):
         if (self.player.collidesWith(self.ground,self)):
             self.player.x -= dx 
             self.player.y -= dy
-
-    def stopMomentum(self):
-        if (self.player.collidesWith(self.ground, self) and self.player.vy != 0):
-            self.player.y = self.ground.y - self.player.size
-            self.player.changeVelocity(0,0)
             
 
     def keyPressed(self,event):
         if (event.key == "Right"):
             self.movePlayer(+5,0)
+            self.player.isMoving = True 
+            self.player.vx = 5
         elif (event.key == "Left"):
             self.movePlayer(-5,0)
+            self.player.isMoving = True 
+            self.player.vx = -5
         elif (event.key == "Up"):
             self.player.isJumping = True
-            self.jump()
+
+    def keyReleased(self,event):
+        if (event.key == "Right" or event.key == "Left"):
+            self.player.isMoving = False 
+            self.player.vx = 0
 
             # "gravity", have to create floor and collisions to stop momentum
 
@@ -194,17 +219,19 @@ class beatApp(App):
         
 
     def redrawAll(self,canvas): # draw player nad beats
-        canvas.create_line(100, 0, 100, self.height) #baseline
+        canvas.create_line(100 - self.scrollX, 0, 100 - self.scrollX, self.height) #baseline
         for beat in self.beats: 
             
-            canvas.create_oval(beat.x - beat.r, beat.y - beat.r, 
-                                beat.x + beat.r, beat.y + beat.r)
+            canvas.create_oval(beat.x - beat.r - self.scrollX, beat.y - beat.r, 
+                                beat.x + beat.r - self.scrollX, beat.y + beat.r)
         canvas.create_text(self.width//2, 30, text = f"Score: {self.score}", 
         font = "Solomon 16")
-        canvas.create_rectangle(self.player.x - self.player.size, self.player.y - self.player.size, 
-                            self.player.x + self.player.size, self.player.y + self.player.size)
+        canvas.create_rectangle(self.player.x - self.player.size , self.player.y - self.player.size , 
+                            self.player.x + self.player.size , self.player.y + self.player.size )
         canvas.create_rectangle(self.ground.x - self.ground.size, self.ground.y - self.ground.size//2, 
                                self.ground.x + self.ground.size, self.ground.y + self.ground.size//2, fill = "black")
+        canvas.create_oval(self.width//2 - self.scrollX, self.height//2, 
+                            self.width//2 - 10 - self.scrollX, self.height//2 - 10, fill = 'red')
 
         
 
@@ -218,14 +245,10 @@ if __name__ == "__main__":
     
 
     threads = list()
-    pyaudioStreamFlag = [True]
-    streamThread = threading.Thread(target=pyaudio_stream_thread, args=(pyaudioStreamFlag,))
-    threads.append(streamThread)
-    streamThread.start()
+    
     appThread = threading.Thread(target = drawing_thread, args=(1,))
     threads.append(appThread)
     appThread.start()
-    pyaudioStreamFlag = [False]
     # how to synchronize threads? 
     
     
