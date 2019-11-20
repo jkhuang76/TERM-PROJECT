@@ -71,7 +71,7 @@ class beatApp(App):
         pass 
 
     def redrawAll(self):
-        
+        pass
 
 
 
