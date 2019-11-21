@@ -145,7 +145,7 @@ class beatApp(App):
         self.pyaudioFlag = [True]
         global streamThread
         streamThread = threading.Thread(target=pyaudio_stream_thread, args=(self.pyaudioFlag,))
-        #streamThread.start()
+        streamThread.start()
         threads.append(streamThread)
         self.beats = beats
         self.counter = 0 
@@ -154,17 +154,18 @@ class beatApp(App):
         self.player = Player(self.width//2, self.height//2 -20, 20)
         self.scrollX = 0 
         self.ground = Ground(self.width//2, self.height*0.8, self.width//2, self.width//4)
-        self.platform = Surface(500, 220, 20, 30)
+        self.platform = Surface(500, 230, 60, 10)
     
 
      
     def timerFired(self):
         # go through beats and move them to the left
         self.counter += self.timerDelay
-        #for beat in self.beats: 
-            #beat.move(-10,0)
+        for beat in self.beats: 
+            beat.move(-10,0)
         if (self.player.isJumping == True):
             self.player.jump(self)
+            
         self.scroll()
         self.onTop()
         self.clearScreen()
@@ -176,7 +177,7 @@ class beatApp(App):
     def movePlayer(self,dx,dy):
         self.player.x += dx 
         self.player.y += dy
-        if (self.player.collidesWith(self.ground    ,self)):
+        if (self.player.collidesWith(self.ground   ,self)):
             self.player.x -= dx 
             self.player.y -= dy
     """        
@@ -184,12 +185,14 @@ class beatApp(App):
         if (self.player.collidesWith(self.platform,self)):
             self.player.y = self.platform.y - self.platform.height - self.player.size
     """
-    def onTop(self):
+    def onTop(self): # keep player on top of the platform 
+        #right now the player can go through the platform when its just scrolling 
         (px0, py0, px1, py1)= self.platform.getBounds(self)
         (Px0, Py0, Px1, Py1) = playerBounds = self.player.getBounds()
-        if (Px0 >= px0 and Px1 <= px1 and 
-            Py1 >= py0): 
-            self.player.y = self.platform.y - self.platform.height - self.player.size
+        if (self.boundsIntersect((px0, py0, px1, py1),(Px0, Py0, Px1, Py1))):
+            if (Px0 >= px0 and Px1 <= px1 and Py1 < py0): 
+                    self.player.isJumping = False
+                    self.player.y = self.platform.y - self.platform.height - self.player.size
 
 
     def keyPressed(self,event):
@@ -226,6 +229,7 @@ class beatApp(App):
                 (ay1 >= by0) and (by1 >= ay0))
 
     def mousePressed(self, event): # click to remove beat and tap along to the beat
+        # a little bit messed up by the scroll
         newBeats = set()
         for beat in self.beats: 
             if (event.x in range(80,120) and beatApp.distance(beat.x, beat.y, event.x, event.y) <= beat.r):
@@ -255,7 +259,6 @@ class beatApp(App):
 
 
 def drawing_thread(name):
-    global myApp 
     myApp = beatApp(width = 500, height = 500)
 
 
