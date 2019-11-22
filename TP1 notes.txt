@@ -1,0 +1,4 @@
+The visual needs "Another One Bites The Dust.wav" to run! 
+Download it at https://github.com/jkhuang76/TERM-PROJECT 
+
+Modules required - threading, pyaudio, aubio, cmu graphics file

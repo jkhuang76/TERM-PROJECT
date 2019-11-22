@@ -35,18 +35,17 @@ def pyaudio_callback(_in_data, _frame_count, _time_info, _status):
 
 
 def pyaudio_stream_thread(flagList):
-    while(flagList[0]):
-        p = pyaudio.PyAudio()
-        pyaudio_format = pyaudio.paFloat32
-        frames_per_buffer = hop_s
-        n_channels = 1
-        stream = p.open(format=pyaudio_format, channels=n_channels, rate=samplerate,
-                output=True, frames_per_buffer=frames_per_buffer,
-                stream_callback=pyaudio_callback)
+    p = pyaudio.PyAudio()
+    pyaudio_format = pyaudio.paFloat32
+    frames_per_buffer = hop_s
+    n_channels = 1
+    stream = p.open(format=pyaudio_format, channels=n_channels, rate=samplerate,
+            output=True, frames_per_buffer=frames_per_buffer,
+            stream_callback=pyaudio_callback)
 
-        stream.start_stream()
-        while stream.is_active():
-            time.sleep(0.1)
+    stream.start_stream()
+    while flagList[0] and stream.is_active():
+        time.sleep(0.1)
     stream.stop_stream()
     stream.close()
     p.terminate()
@@ -94,7 +93,7 @@ class Player(object): # basic player class represented by square
         self.speed = Player.DEFAULT_SPEED
         self.isJumping = False
         self.isMoving = False
-    
+        self.isOnPlatform = False
     def changeVelocity(self, vx, vy): 
         self.vx = vx 
         self.vy = vy
@@ -165,6 +164,7 @@ class beatApp(App):
             beat.move(-10,0)
         if (self.player.isJumping == True):
             self.player.jump(self)
+        
             
         self.scroll()
         self.onTop()
@@ -180,7 +180,7 @@ class beatApp(App):
         if (self.player.collidesWith(self.ground   ,self)):
             self.player.x -= dx 
             self.player.y -= dy
-    """        
+    """         
     def checkCollisions(self):
         if (self.player.collidesWith(self.platform,self)):
             self.player.y = self.platform.y - self.platform.height - self.player.size
@@ -189,11 +189,11 @@ class beatApp(App):
         #right now the player can go through the platform when its just scrolling 
         (px0, py0, px1, py1)= self.platform.getBounds(self)
         (Px0, Py0, Px1, Py1) = playerBounds = self.player.getBounds()
-        if (self.boundsIntersect((px0, py0, px1, py1),(Px0, Py0, Px1, Py1))):
+        if (not self.boundsIntersect((px0, py0, px1, py1),(Px0, Py0, Px1, Py1))):
             if (Px0 >= px0 and Px1 <= px1 and Py1 < py0): 
-                    self.player.isJumping = False
-                    self.player.y = self.platform.y - self.platform.height - self.player.size
-
+                self.player.isJumping = False
+                self.player.isOnPlatform = True
+                #self.player.y = self.platform.y - self.platform.height - self.player.size
 
     def keyPressed(self,event):
         if (event.key == "Right"):
