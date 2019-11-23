@@ -33,7 +33,8 @@ def pyaudio_callback(_in_data, _frame_count, _time_info, _status):
         return (audiobuf, pyaudio.paComplete)
     return (audiobuf, pyaudio.paContinue)
 
-
+# pyaudio callback and stream method from https://github.com/aubio/aubio/tree/master/python/demos
+# specifically tap_the_beat demo
 def pyaudio_stream_thread(flagList):
     p = pyaudio.PyAudio()
     pyaudio_format = pyaudio.paFloat32
@@ -115,6 +116,7 @@ class Player(object): # basic player class represented by square
             return True
         return False
     def jump(self,app):
+        # move gravity 
         self.y += self.vy *Player.JUMP_ACCEL #timestarted time ended to be added
         self.x += self.vx *Player.JUMP_ACCEL
         if (self.vy < 0):
@@ -194,6 +196,8 @@ class beatApp(App):
                 self.player.isJumping = False
                 self.player.isOnPlatform = True
                 #self.player.y = self.platform.y - self.platform.height - self.player.size
+
+        
 
     def keyPressed(self,event):
         if (event.key == "Right"):
