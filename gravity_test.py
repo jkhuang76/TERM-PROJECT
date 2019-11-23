@@ -71,7 +71,12 @@ class GravityApp(App):
             ## have to make sure can't go through when holding up key
         #if ( self.isOnTopOfPlatform() ):
            # self.player.vy = 0 
-            
+        if (not self.player.isJumping and self.isOnTopOfPlatform()):
+            self.player.isOnPlatform = True 
+            self.player.vy = 0
+ 
+        else: 
+            self.player.isOnPlatform = False
         self.player.y += self.player.vy 
         self.player.x += self.player.vx 
 
@@ -88,12 +93,7 @@ class GravityApp(App):
     def timerFired(self):
         # go through beats and move them to the left
         self.counter += self.timerDelay
-        if (not self.player.isJumping and self.isOnTopOfPlatform()):
-            self.player.isOnPlatform = True 
-            self.player.vy = 0
-            
-        else: 
-            self.player.isOnPlatform = False
+        
         self.update()
         
 

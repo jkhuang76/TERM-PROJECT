@@ -22,34 +22,43 @@ samplerate = a_source.samplerate
 # create aubio tempo detection
 a_tempo = aubio.tempo("default", win_s, hop_s, samplerate)
 
-beats = [] # global variable, better way to share information between the two threads? 
-def pyaudio_callback(_in_data, _frame_count, _time_info, _status):
-    samples, read = a_source()
-    is_beat = a_tempo(samples)
-    if is_beat:
-        beats.append((Beat(500, 200, 10))) # hard coded based on current canvas
-    audiobuf = samples.tobytes()
-    if read < hop_s:
-        return (audiobuf, pyaudio.paComplete)
-    return (audiobuf, pyaudio.paContinue)
+class AudioCollector(object):
+    # global variable, better way to share information between the two threads? 
+    def __init__(self):
+        self.beats = []
+        self.i = 0
+    def pyaudio_callback(self,_in_data, _frame_count, _time_info, _status):
+        samples, read = a_source()
+        is_beat = a_tempo(samples)
+        if is_beat:
+            self.i += 5
+            self.beats.append((Beat(500 + self.i * 30, 200, 10)))
+             # hard coded based on current canvas
+        audiobuf = samples.tobytes()
+        if read < hop_s:
+            return (audiobuf, pyaudio.paComplete)
+        return (audiobuf, pyaudio.paContinue)
 
-# pyaudio callback and stream method from https://github.com/aubio/aubio/tree/master/python/demos
-# specifically tap_the_beat demo
-def pyaudio_stream_thread(flagList):
-    p = pyaudio.PyAudio()
-    pyaudio_format = pyaudio.paFloat32
-    frames_per_buffer = hop_s
-    n_channels = 1
-    stream = p.open(format=pyaudio_format, channels=n_channels, rate=samplerate,
-            output=True, frames_per_buffer=frames_per_buffer,
-            stream_callback=pyaudio_callback)
+    # pyaudio callback and stream method from https://github.com/aubio/aubio/tree/master/python/demos
+    # specifically tap_the_beat demo
+    def pyaudio_stream_thread(self,flagList):
+        p = pyaudio.PyAudio()
+        pyaudio_format = pyaudio.paFloat32
+        frames_per_buffer = hop_s
+        n_channels = 1
+        stream = p.open(format=pyaudio_format, channels=n_channels, rate=samplerate,
+                output=True, frames_per_buffer=frames_per_buffer,
+                stream_callback=self.pyaudio_callback)
 
-    stream.start_stream()
-    while flagList[0] and stream.is_active():
-        time.sleep(0.1)
-    stream.stop_stream()
-    stream.close()
-    p.terminate()
+        stream.start_stream()
+        while flagList[0] and stream.is_active():
+            time.sleep(0.1)
+        stream.stop_stream()
+        stream.close()
+        p.terminate()
+    
+    def getBeats(self):
+        return self.beats
 
 class Beat(object):
     #basic beat represented by a dot
@@ -82,16 +91,12 @@ class Ground(Surface):
         return (x0,y0,x1,y1)
 
 class Player(object): # basic player class represented by square
-    DEFAULT_VELOCITY = -5
-    DEFAULT_SPEED = 10
-    JUMP_ACCEL = 3
     def __init__(self, x, y, size):
         self.x = x
         self.y = y 
         self.size = size
         self.vx = 0
-        self.vy = Player.DEFAULT_VELOCITY  #test of gravity
-        self.speed = Player.DEFAULT_SPEED
+        self.vy = 0 #test of gravity
         self.isJumping = False
         self.isMoving = False
         self.isOnPlatform = False
@@ -115,19 +120,7 @@ class Player(object): # basic player class represented by square
         if (app.boundsIntersect(playerBounds, otherBounds)): 
             return True
         return False
-    def jump(self,app):
-        # move gravity 
-        self.y += self.vy *Player.JUMP_ACCEL #timestarted time ended to be added
-        self.x += self.vx *Player.JUMP_ACCEL
-        if (self.vy < 0):
-            self.vy += 1
-        else:
-            self.vy = -Player.DEFAULT_VELOCITY
-            self.vy -=1 
-        if self.collidesWith(app.ground, app):
-            self.isJumping = False 
-            self.y = 250
-            self.vy = Player.DEFAULT_VELOCITY
+    
 
     
             
@@ -135,67 +128,92 @@ class Player(object): # basic player class represented by square
 
 
 class beatApp(App):
+    GRAVITY = 3
     @staticmethod
     def distance(x1,y1,x2,y2):
         return ((x2-x1)**2 + (y2-y1)**2)**0.5
     def __init__(self, width, height):
         super().__init__(width = width, height = height)
-        print("bye")
         self.pyaudioFlag[0] = False
     def appStarted(self):
         self.pyaudioFlag = [True]
         global streamThread
-        streamThread = threading.Thread(target=pyaudio_stream_thread, args=(self.pyaudioFlag,))
+        self.audioTest = AudioCollector()
+        streamThread = threading.Thread(target=self.audioTest.pyaudio_stream_thread, args=(self.pyaudioFlag,))
         streamThread.start()
         threads.append(streamThread)
-        self.beats = beats
+        self.beats = self.audioTest.getBeats()
         self.counter = 0 
         self.timerDelay = 100
         self.score = 0
         self.player = Player(self.width//2, self.height//2 -20, 20)
         self.scrollX = 0 
-        self.ground = Ground(self.width//2, self.height*0.8, self.width//2, self.width//4)
-        self.platform = Surface(500, 230, 60, 10)
+        self.ground = Ground(self.width//2, self.height, self.width//2, self.width//4)
+        self.platforms = set() 
+        self.platforms.add(Surface(500, 230, 60, 10))
     
 
      
     def timerFired(self):
         # go through beats and move them to the left
         self.counter += self.timerDelay
-        for beat in self.beats: 
-            beat.move(-10,0)
-        if (self.player.isJumping == True):
-            self.player.jump(self)
-        
-            
-        self.scroll()
-        self.onTop()
+        #for beat in self.beats: 
+            #beat.move(-10,0)
+        self.update()
         self.clearScreen()
         #self.checkCollisions()
 
-    def scroll(self):
-        self.scrollX += 5
+    def update(self):
+        if (len(self.beats) > 0):
+            self.scrollX += 5
+        if (self.player.vy > 0): 
+            self.player.vy += beatApp.GRAVITY 
+        elif (not self.player.isOnPlatform and self.player.vy <= 0):
+            self.player.vy -= -beatApp.GRAVITY 
+            ## have to make sure can't go through when holding up key
+        for platform in self.platforms:
+            if (not self.player.isJumping and (self.isOnTopOfPlatform(platform) or self.isOnTopOfGround())):
+                self.player.isOnPlatform = True 
+                self.player.vy = 0
+            else: 
+                self.player.isOnPlatform = False
+        
+        self.player.y += self.player.vy 
+        self.player.x += self.player.vx 
+    
+    
 
     def movePlayer(self,dx,dy):
         self.player.x += dx 
         self.player.y += dy
-        if (self.player.collidesWith(self.ground   ,self)):
+        if (self.player.collidesWith(self.ground,self)):
             self.player.x -= dx 
             self.player.y -= dy
     """         
     def checkCollisions(self):
         if (self.player.collidesWith(self.platform,self)):
             self.player.y = self.platform.y - self.platform.height - self.player.size
+
     """
-    def onTop(self): # keep player on top of the platform 
+
+    def isOnTopOfGround(self): # keep player on top of the platform 
         #right now the player can go through the platform when its just scrolling 
-        (px0, py0, px1, py1)= self.platform.getBounds(self)
+        margin = self.player.size//4
+        (gx0, gy0, gx1, gy1)= self.ground.getBounds()
         (Px0, Py0, Px1, Py1) = playerBounds = self.player.getBounds()
-        if (not self.boundsIntersect((px0, py0, px1, py1),(Px0, Py0, Px1, Py1))):
-            if (Px0 >= px0 and Px1 <= px1 and Py1 < py0): 
-                self.player.isJumping = False
-                self.player.isOnPlatform = True
-                #self.player.y = self.platform.y - self.platform.height - self.player.size
+        if (not self.boundsIntersect((gx0, gy0, gx1, gy1),(Px0, Py0, Px1, Py1))):
+            if (Px0 >= gx0  and Px1 <= gx1 and Py1 <= gy0 and Py1 > gy0 - self.player.size - margin): 
+                return True
+        return False
+
+    def isOnTopOfPlatform(self,platform): # keep player on top of the platform 
+        #right now the player can go through the platform when its just scrolling 
+        (platx0, platy0, platx1, platy1)= platform.getBounds(self)
+        (Px0, Py0, Px1, Py1) = playerBounds = self.player.getBounds()
+        if (not self.boundsIntersect((platx0, platy0, platx1, platy1),(Px0, Py0, Px1, Py1))):
+            if (Px0 >= platx0 - self.player.size and Px1 <= platx1 and Py1 <= platy0 and Py1 > platy0 - self.player.size): 
+                return True
+        return False
 
         
 
@@ -210,17 +228,21 @@ class beatApp(App):
             self.player.vx = -5
         elif (event.key == "Up"):
             self.player.isJumping = True
+            self.player.vy = -15
 
     def keyReleased(self,event):
         if (event.key == "Right" or event.key == "Left"):
             self.player.isMoving = False 
             self.player.vx = 0
+        elif (event.key == "Up"):
+            self.player.isJumping = False
 
             # "gravity", have to create floor and collisions to stop momentum
 
     def clearScreen(self): # gets rid of beats that are off the screen
         #tempBeats = copy.copy(beats) # creates lots of lists, how to do this more efficiently?
         newBeats = set()
+        beats = self.audioTest.getBeats()
         for beat in beats: 
             if (beat.x > 0):
                 newBeats.add(beat)
@@ -256,8 +278,9 @@ class beatApp(App):
                                self.ground.x + self.ground.width, self.ground.y + self.ground.height, fill = "black")
         canvas.create_oval(self.width//2 - self.scrollX, self.height//2, 
                             self.width//2 - 10 - self.scrollX, self.height//2 - 10, fill = 'red')
-        canvas.create_rectangle(self.platform.x - self.platform.width - self.scrollX, self.platform.y - self.platform.height, 
-                               self.platform.x + self.platform.width - self.scrollX, self.platform.y + self.platform.height)
+        for platform in self.platforms: 
+            canvas.create_rectangle(platform.x - platform.width - self.scrollX, platform.y - platform.height, 
+                                platform.x + platform.width - self.scrollX, platform.y + platform.height)
 
         
 
@@ -274,6 +297,5 @@ if __name__ == "__main__":
     appThread = threading.Thread(target = drawing_thread, args=(1,))
     threads.append(appThread)
     appThread.start()
-    # how to synchronize threads? 
-    
+     
     
