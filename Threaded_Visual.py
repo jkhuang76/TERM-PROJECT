@@ -157,6 +157,8 @@ class GameMode(Mode):
         # go through beats and move them to the left
         if (mode.gameOver):
             return 
+        if (mode.counter >= 3000 and mode.counter %1000 == 0):
+            mode.score += 5
         mode.counter += mode.timerDelay
         #for beat in mode.beats: 
             #beat.move(-10,0)
@@ -323,6 +325,7 @@ class GameOverMode(Mode):
 class WonMode(Mode):
     def redrawAll(mode,canvas):
         canvas.create_text(mode.width//2, mode.height//2, text = "You Won!", font = "Lato 20")
+        canvas.create_text(mode.width//2, mode.height//2 + 40, text = f"Score: {mode.app.gameMode.score}", font = "Lato 20")
         canvas.create_text(mode.width//2, mode.height//2 + 20, text = "Press r to restart!", font = "Lato 16")
     def keyPressed(mode,event):
         if (event.key == "r"):
