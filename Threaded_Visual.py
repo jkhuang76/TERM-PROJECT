@@ -5,9 +5,13 @@ import random
 import copy
 import time
 from cmu_112_graphics import *
+from Surface import Surface
+from level_generation import BeatCollector 
 from tkinter import *
 import numpy as np
 
+
+# cmu 112 graphics from https://www.cs.cmu.edu/~112/notes/notes-animations-part1.html
 win_s = 1024                # fft size
 hop_s = win_s // 2    
 
@@ -23,7 +27,7 @@ samplerate = a_source.samplerate
 a_tempo = aubio.tempo("default", win_s, hop_s, samplerate)
 
 class AudioCollector(object):
-    # global variable, better way to share information between the two threads? 
+    #moved pyaudio stuff into class
     def __init__(self):
         self.beats = []
         self.i = 0
@@ -51,7 +55,7 @@ class AudioCollector(object):
                 stream_callback=self.pyaudio_callback)
 
         stream.start_stream()
-        while flagList[0] and stream.is_active():
+        while flagList[0] and not flagList[1] and stream.is_active():
             time.sleep(0.1)
         stream.stop_stream()
         stream.close()
@@ -73,16 +77,7 @@ class Beat(object):
     def __repr__(self):
         return f"Beat at {self.x}, {self.y} with radius {self.r}"
 
-class Surface(object): #surfaces - "ground", platforms, rectangles
-    def __init__(self, x, y, width, height):
-        self.x = x 
-        self.y = y 
-        self.width = width
-        self.height = height
-    def getBounds(self,app):
-        (x0,y0,x1,y1) = (self.x - self.width - app.scrollX, self.y - self.height, 
-                               self.x + self.width - app.scrollX, self.y + self.height)
-        return (x0,y0,x1,y1)
+
 
 class Ground(Surface):
     def getBounds(self):
@@ -137,11 +132,18 @@ class beatApp(App):
         self.pyaudioFlag[0] = False
     def appStarted(self):
         self.pyaudioFlag = [True]
+        self.gameOver = False
+        self.pyaudioFlag.append(self.gameOver)
         global streamThread
         self.audioTest = AudioCollector()
+        
         streamThread = threading.Thread(target=self.audioTest.pyaudio_stream_thread, args=(self.pyaudioFlag,))
         streamThread.start()
         threads.append(streamThread)
+        beatCollector1 = BeatCollector("Another One Bites The Dust.wav", 48000)
+        beatsTime = beatCollector1.collectBeats()
+        beatCollector1.createPlatforms()
+        self.platforms = beatCollector1.getPlatforms() 
         self.beats = self.audioTest.getBeats()
         self.counter = 0 
         self.timerDelay = 100
@@ -149,19 +151,20 @@ class beatApp(App):
         self.player = Player(self.width//2, self.height//2 -20, 20)
         self.scrollX = 0 
         self.ground = Ground(self.width//2, self.height, self.width//2, self.width//4)
-        self.platforms = set() 
-        self.platforms.add(Surface(500, 230, 60, 10))
+        self.platforms.insert(0,Surface(500, 230, 60, 10))
     
 
      
     def timerFired(self):
         # go through beats and move them to the left
+        if (self.gameOver):
+            return 
         self.counter += self.timerDelay
         #for beat in self.beats: 
             #beat.move(-10,0)
         self.update()
         self.clearScreen()
-        #self.checkCollisions()
+        self.checkCollisions()
 
     def update(self):
         if (len(self.beats) > 0):
@@ -189,12 +192,13 @@ class beatApp(App):
         if (self.player.collidesWith(self.ground,self)):
             self.player.x -= dx 
             self.player.y -= dy
-    """         
+            
     def checkCollisions(self):
-        if (self.player.collidesWith(self.platform,self)):
-            self.player.y = self.platform.y - self.platform.height - self.player.size
+        for platform in self.platforms:
+            if (self.player.collidesWith(platform,self)):
+                self.gameOver = True
+                self.pyaudioFlag[1] = True
 
-    """
 
     def isOnTopOfGround(self): # keep player on top of the platform 
         #right now the player can go through the platform when its just scrolling 
@@ -211,13 +215,15 @@ class beatApp(App):
         (platx0, platy0, platx1, platy1)= platform.getBounds(self)
         (Px0, Py0, Px1, Py1) = playerBounds = self.player.getBounds()
         if (not self.boundsIntersect((platx0, platy0, platx1, platy1),(Px0, Py0, Px1, Py1))):
-            if (Px0 >= platx0 - self.player.size and Px1 <= platx1 and Py1 <= platy0 and Py1 > platy0 - self.player.size): 
+            if (Px0 >= platx0 - self.player.size and Px1 <= platx1 + self.player.size and Py1 <= platy0 and Py1 > platy0 - self.player.size): 
                 return True
         return False
 
         
 
     def keyPressed(self,event):
+        if (self.gameOver):
+            return 
         if (event.key == "Right"):
             self.movePlayer(+5,0)
             self.player.isMoving = True 
@@ -229,6 +235,8 @@ class beatApp(App):
         elif (event.key == "Up"):
             self.player.isJumping = True
             self.player.vy = -15
+        elif (event.key == "S"): # speed up scrolling to see rest of level
+            self.scrollX += 1000
 
     def keyReleased(self,event):
         if (event.key == "Right" or event.key == "Left"):
@@ -242,11 +250,16 @@ class beatApp(App):
     def clearScreen(self): # gets rid of beats that are off the screen
         #tempBeats = copy.copy(beats) # creates lots of lists, how to do this more efficiently?
         newBeats = set()
+        newPlatforms = set()
         beats = self.audioTest.getBeats()
         for beat in beats: 
             if (beat.x > 0):
                 newBeats.add(beat)
+        for platform in self.platforms:
+            if (platform.x - self.scrollX > 0):
+                newPlatforms.add(platform)
         self.beats = newBeats
+        self.platforms = newPlatforms
     
     def boundsIntersect(self, boundsA, boundsB):
         (ax0, ay0, ax1, ay1) = boundsA
@@ -272,6 +285,8 @@ class beatApp(App):
                                 beat.x + beat.r - self.scrollX, beat.y + beat.r)
         canvas.create_text(self.width//2, 30, text = f"Score: {self.score}", 
         font = "Solomon 16")
+        canvas.create_text(self.width//2, 60, text = f"PlayerX: {self.player.x + self.scrollX}", 
+        font = "Solomon 16")
         canvas.create_rectangle(self.player.x - self.player.size , self.player.y - self.player.size , 
                             self.player.x + self.player.size , self.player.y + self.player.size )
         canvas.create_rectangle(self.ground.x - self.ground.width, self.ground.y - self.ground.height, 
@@ -281,6 +296,7 @@ class beatApp(App):
         for platform in self.platforms: 
             canvas.create_rectangle(platform.x - platform.width - self.scrollX, platform.y - platform.height, 
                                 platform.x + platform.width - self.scrollX, platform.y + platform.height)
+        
 
         
 
