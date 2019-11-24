@@ -8,6 +8,8 @@ from Surface import Surface
 from tkinter import *
 import numpy as np
 
+# cmu 112 graphics from https://www.cs.cmu.edu/~112/notes/notes-animations-part1.html
+
 
 startTime = time.time()
 class BeatCollector(object):
@@ -22,6 +24,7 @@ class BeatCollector(object):
         self.volumes = []
         self.total_frames = 0
         self.platforms  = []
+        self.goal = None
         self.defaultGap = 30
         self.scrollSpeed = 50 
         self.height = 500
@@ -53,6 +56,7 @@ class BeatCollector(object):
             if (i == len(beats) - 1):
                 beats[i] += beats[i-1] + 30
                 self.platforms.append(Surface(beats[i], defaultY, 30, 10))
+                self.goal = Goal(beats[i], defaultY, 50)
             elif (i == 0):
                 beats[i] += 500 
                 self.platforms.append(Surface(beats[i], defaultY, 30, 10))
@@ -73,20 +77,25 @@ class BeatCollector(object):
     
     def getPlatforms(self):
         return self.platforms
+    def getGoal(self):
+        return self.goal
 
 class Goal(object):
     def __init__(self, x, y, r): 
         self.x = x 
         self.y = y 
         self.r = r
+    def getBounds(self,app):
+        (x0,y0,x1,y1) = (self.x - self.r - app.scrollX, self.y - self.r, 
+                               self.x + self.r - app.scrollX, self.y + self.r)
+        return (x0,y0,x1,y1)
 
 class LevelApp(App):
     def appStarted(self):
         beatCollector1 = BeatCollector("Another One Bites The Dust.wav", 48000)
         beatsTime = beatCollector1.collectBeats()
         beatCollector1.createPlatforms()
-        self.platforms = beatCollector1.getPlatforms() 
-        
+        self.platforms = beatCollector1.getPlatforms()         
         self.scrollSpeed = 5
         self.scrollX = 0 
     def timerFired(self):

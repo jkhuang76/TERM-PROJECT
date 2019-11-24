@@ -30,21 +30,20 @@ class AudioCollector(object):
     #moved pyaudio stuff into class
     def __init__(self):
         self.beats = []
-        self.i = 0
+    # pyaudio callback and stream method from https://github.com/aubio/aubio/tree/master/python/demos
+    # specifically tap_the_beat demo
     def pyaudio_callback(self,_in_data, _frame_count, _time_info, _status):
         samples, read = a_source()
         is_beat = a_tempo(samples)
-        if is_beat:
-            self.i += 5
-            self.beats.append((Beat(500 + self.i * 30, 200, 10)))
+        #if is_beat:
+            #self.beats.append((Beat(500 + self.i * 30, 200, 10)))
              # hard coded based on current canvas
         audiobuf = samples.tobytes()
         if read < hop_s:
             return (audiobuf, pyaudio.paComplete)
         return (audiobuf, pyaudio.paContinue)
 
-    # pyaudio callback and stream method from https://github.com/aubio/aubio/tree/master/python/demos
-    # specifically tap_the_beat demo
+
     def pyaudio_stream_thread(self,flagList):
         p = pyaudio.PyAudio()
         pyaudio_format = pyaudio.paFloat32
@@ -122,187 +121,229 @@ class Player(object): # basic player class represented by square
 
 
 
-class beatApp(App):
+class GameMode(Mode):
     GRAVITY = 3
     @staticmethod
     def distance(x1,y1,x2,y2):
         return ((x2-x1)**2 + (y2-y1)**2)**0.5
-    def __init__(self, width, height):
-        super().__init__(width = width, height = height)
-        self.pyaudioFlag[0] = False
-    def appStarted(self):
-        self.pyaudioFlag = [True]
-        self.gameOver = False
-        self.pyaudioFlag.append(self.gameOver)
+    
+    def appStarted(mode):
+        mode.pyaudioFlag = [True]
+        mode.gameOver = False
+        mode.pyaudioFlag.append(mode.gameOver)
         global streamThread
-        self.audioTest = AudioCollector()
+        mode.audioTest = AudioCollector()
         
-        streamThread = threading.Thread(target=self.audioTest.pyaudio_stream_thread, args=(self.pyaudioFlag,))
+        streamThread = threading.Thread(target=mode.audioTest.pyaudio_stream_thread, args=(mode.pyaudioFlag,))
         streamThread.start()
         threads.append(streamThread)
         beatCollector1 = BeatCollector("Another One Bites The Dust.wav", 48000)
         beatsTime = beatCollector1.collectBeats()
         beatCollector1.createPlatforms()
-        self.platforms = beatCollector1.getPlatforms() 
-        self.beats = self.audioTest.getBeats()
-        self.counter = 0 
-        self.timerDelay = 100
-        self.score = 0
-        self.player = Player(self.width//2, self.height//2 -20, 20)
-        self.scrollX = 0 
-        self.ground = Ground(self.width//2, self.height, self.width//2, self.width//4)
-        self.platforms.insert(0,Surface(500, 230, 60, 10))
+        mode.goal = beatCollector1.getGoal()
+        mode.platforms = beatCollector1.getPlatforms() 
+        mode.beats = mode.audioTest.getBeats()
+        mode.counter = 0 
+        mode.timerDelay = 100
+        mode.score = 0
+        mode.player = Player(mode.width//2, mode.height//2 -20, 20)
+        mode.scrollX = 0 
+        mode.ground = Ground(mode.width//2, mode.height, mode.width//2, mode.width//4)
+        mode.platforms.insert(0,Surface(500, 230, 60, 10)) # initial test platform 
     
 
      
-    def timerFired(self):
+    def timerFired(mode):
         # go through beats and move them to the left
-        if (self.gameOver):
+        if (mode.gameOver):
             return 
-        self.counter += self.timerDelay
-        #for beat in self.beats: 
+        mode.counter += mode.timerDelay
+        #for beat in mode.beats: 
             #beat.move(-10,0)
-        self.update()
-        self.clearScreen()
-        self.checkCollisions()
+        mode.update()
+        mode.clearScreen()
+        mode.checkCollisions()
 
-    def update(self):
-        if (len(self.beats) > 0):
-            self.scrollX += 5
-        if (self.player.vy > 0): 
-            self.player.vy += beatApp.GRAVITY 
-        elif (not self.player.isOnPlatform and self.player.vy <= 0):
-            self.player.vy -= -beatApp.GRAVITY 
+    def update(mode):
+        if (mode.counter >= 3000):
+            mode.scrollX += 5
+        if (mode.player.vy > 0): 
+            mode.player.vy += GameMode.GRAVITY 
+        elif (not mode.player.isOnPlatform and mode.player.vy <= 0):
+            mode.player.vy -= -GameMode.GRAVITY 
             ## have to make sure can't go through when holding up key
-        for platform in self.platforms:
-            if (not self.player.isJumping and (self.isOnTopOfPlatform(platform) or self.isOnTopOfGround())):
-                self.player.isOnPlatform = True 
-                self.player.vy = 0
+        for platform in mode.platforms:
+            if (not mode.player.isJumping and (mode.isOnTopOfPlatform(platform) or mode.isOnTopOfGround())):
+                mode.player.isOnPlatform = True 
+                mode.player.vy = 0
             else: 
-                self.player.isOnPlatform = False
+                mode.player.isOnPlatform = False
         
-        self.player.y += self.player.vy 
-        self.player.x += self.player.vx 
+        mode.player.y += mode.player.vy 
+        mode.player.x += mode.player.vx 
     
     
 
-    def movePlayer(self,dx,dy):
-        self.player.x += dx 
-        self.player.y += dy
-        if (self.player.collidesWith(self.ground,self)):
-            self.player.x -= dx 
-            self.player.y -= dy
+    def movePlayer(mode,dx,dy):
+        mode.player.x += dx 
+        mode.player.y += dy
+        if (mode.player.collidesWith(mode.ground,mode)):
+            mode.player.x -= dx 
+            mode.player.y -= dy
             
-    def checkCollisions(self):
-        for platform in self.platforms:
-            if (self.player.collidesWith(platform,self)):
-                self.gameOver = True
-                self.pyaudioFlag[1] = True
+    def checkCollisions(mode):
+        if (mode.player.collidesWith(mode.goal,mode)):
+            mode.gameOver = True
+            mode.pyaudioFlag[1] = True
+            mode.app.setActiveMode(mode.app.wonMode)
+        for platform in mode.platforms:
+            if (mode.player.collidesWith(platform,mode)):
+               mode.gameOver = True
+               mode.pyaudioFlag[1] = True
+               mode.app.setActiveMode(mode.app.gameOverMode)
+        
 
 
-    def isOnTopOfGround(self): # keep player on top of the platform 
-        #right now the player can go through the platform when its just scrolling 
-        margin = self.player.size//4
-        (gx0, gy0, gx1, gy1)= self.ground.getBounds()
-        (Px0, Py0, Px1, Py1) = playerBounds = self.player.getBounds()
-        if (not self.boundsIntersect((gx0, gy0, gx1, gy1),(Px0, Py0, Px1, Py1))):
-            if (Px0 >= gx0  and Px1 <= gx1 and Py1 <= gy0 and Py1 > gy0 - self.player.size - margin): 
+    def isOnTopOfGround(mode): # keep player on top of the ground
+        margin = mode.player.size//4
+        (gx0, gy0, gx1, gy1)= mode.ground.getBounds()
+        (Px0, Py0, Px1, Py1) = playerBounds = mode.player.getBounds()
+        if (not mode.boundsIntersect((gx0, gy0, gx1, gy1),(Px0, Py0, Px1, Py1))):
+            if (Px0 >= gx0  and Px1 <= gx1 and Py1 <= gy0 and Py1 > gy0 - mode.player.size - margin): 
                 return True
         return False
 
-    def isOnTopOfPlatform(self,platform): # keep player on top of the platform 
+    def isOnTopOfPlatform(mode,platform): # keep player on top of the platform 
         #right now the player can go through the platform when its just scrolling 
-        (platx0, platy0, platx1, platy1)= platform.getBounds(self)
-        (Px0, Py0, Px1, Py1) = playerBounds = self.player.getBounds()
-        if (not self.boundsIntersect((platx0, platy0, platx1, platy1),(Px0, Py0, Px1, Py1))):
-            if (Px0 >= platx0 - self.player.size and Px1 <= platx1 + self.player.size and Py1 <= platy0 and Py1 > platy0 - self.player.size): 
+        (platx0, platy0, platx1, platy1)= platform.getBounds(mode)
+        (Px0, Py0, Px1, Py1) = playerBounds = mode.player.getBounds()
+        if (not mode.boundsIntersect((platx0, platy0, platx1, platy1),(Px0, Py0, Px1, Py1))):
+            if (Px0 >= platx0 - mode.player.size and Px1 <= platx1 + mode.player.size and Py1 <= platy0 and Py1 > platy0 - mode.player.size): 
                 return True
         return False
 
         
 
-    def keyPressed(self,event):
-        if (self.gameOver):
+    def keyPressed(mode,event):
+        if (mode.gameOver):
             return 
         if (event.key == "Right"):
-            self.movePlayer(+5,0)
-            self.player.isMoving = True 
-            self.player.vx = 5
+            mode.movePlayer(+5,0)
+            mode.player.isMoving = True 
+            mode.player.vx = 5
         elif (event.key == "Left"):
-            self.movePlayer(-5,0)
-            self.player.isMoving = True 
-            self.player.vx = -5
+            mode.movePlayer(-5,0)
+            mode.player.isMoving = True 
+            mode.player.vx = -5
         elif (event.key == "Up"):
-            self.player.isJumping = True
-            self.player.vy = -15
+            mode.player.isJumping = True
+            mode.player.vy = -15
         elif (event.key == "S"): # speed up scrolling to see rest of level
-            self.scrollX += 1000
+            mode.scrollX += 1000
 
-    def keyReleased(self,event):
+    def keyReleased(mode,event):
         if (event.key == "Right" or event.key == "Left"):
-            self.player.isMoving = False 
-            self.player.vx = 0
+            mode.player.isMoving = False 
+            mode.player.vx = 0
         elif (event.key == "Up"):
-            self.player.isJumping = False
+            mode.player.isJumping = False
 
             # "gravity", have to create floor and collisions to stop momentum
 
-    def clearScreen(self): # gets rid of beats that are off the screen
+    def clearScreen(mode): # gets rid of beats that are off the screen
         #tempBeats = copy.copy(beats) # creates lots of lists, how to do this more efficiently?
         newBeats = set()
         newPlatforms = set()
-        beats = self.audioTest.getBeats()
+        beats = mode.audioTest.getBeats()
         for beat in beats: 
             if (beat.x > 0):
                 newBeats.add(beat)
-        for platform in self.platforms:
-            if (platform.x - self.scrollX > 0):
+        for platform in mode.platforms:
+            if (platform.x - mode.scrollX > 0):
                 newPlatforms.add(platform)
-        self.beats = newBeats
-        self.platforms = newPlatforms
+        mode.beats = newBeats
+        mode.platforms = newPlatforms
     
-    def boundsIntersect(self, boundsA, boundsB):
+    # cmu 112 graphics from https://www.cs.cmu.edu/~112/notes/notes-animations-part2.html
+    def boundsIntersect(mode, boundsA, boundsB):
         (ax0, ay0, ax1, ay1) = boundsA
         (bx0, by0, bx1, by1) = boundsB
         return ((ax1 >= bx0) and (bx1 >= ax0) and
                 (ay1 >= by0) and (by1 >= ay0))
 
-    def mousePressed(self, event): # click to remove beat and tap along to the beat
+    def mousePressed(mode, event): # click to remove beat and tap along to the beat
         # a little bit messed up by the scroll
         newBeats = set()
-        for beat in self.beats: 
-            if (event.x in range(80,120) and beatApp.distance(beat.x, beat.y, event.x, event.y) <= beat.r):
+        for beat in mode.beats: 
+            if (event.x in range(80,120) and GameMode.distance(beat.x, beat.y, event.x, event.y) <= beat.r):
                 beats.remove(beat)
-                self.score += 5
+                mode.score += 5
 
         
 
-    def redrawAll(self,canvas): # draw player nad beats
-        canvas.create_line(100 - self.scrollX, 0, 100 - self.scrollX, self.height) #baseline
-        for beat in self.beats: 
+    def redrawAll(mode,canvas): # draw player and beats
+        canvas.create_line(100 - mode.scrollX, 0, 100 - mode.scrollX, mode.height) #baseline
+        #countdown before game starts
+        if (mode.counter == 1000):
+            canvas.create_text(mode.width//2, mode.height//2, text = "3", font = "Solomon 30")
+        elif (mode.counter == 2000):
+            canvas.create_text(mode.width//2, mode.height//2, text = "2",font = "Solomon 30")
+        elif (mode.counter == 3000):
+            canvas.create_text(mode.width//2, mode.height//2, text = "1", font = "Solomon 30 ")
+
+        for beat in mode.beats: 
             
-            canvas.create_oval(beat.x - beat.r - self.scrollX, beat.y - beat.r, 
-                                beat.x + beat.r - self.scrollX, beat.y + beat.r)
-        canvas.create_text(self.width//2, 30, text = f"Score: {self.score}", 
+            canvas.create_oval(beat.x - beat.r - mode.scrollX, beat.y - beat.r, 
+                                beat.x + beat.r - mode.scrollX, beat.y + beat.r)
+        canvas.create_text(mode.width//2, 30, text = f"Score: {mode.score}", 
         font = "Solomon 16")
-        canvas.create_text(self.width//2, 60, text = f"PlayerX: {self.player.x + self.scrollX}", 
+        canvas.create_text(mode.width//2, 60, text = f"PlayerX: {mode.player.x + mode.scrollX}", 
         font = "Solomon 16")
-        canvas.create_rectangle(self.player.x - self.player.size , self.player.y - self.player.size , 
-                            self.player.x + self.player.size , self.player.y + self.player.size )
-        canvas.create_rectangle(self.ground.x - self.ground.width, self.ground.y - self.ground.height, 
-                               self.ground.x + self.ground.width, self.ground.y + self.ground.height, fill = "black")
-        canvas.create_oval(self.width//2 - self.scrollX, self.height//2, 
-                            self.width//2 - 10 - self.scrollX, self.height//2 - 10, fill = 'red')
-        for platform in self.platforms: 
-            canvas.create_rectangle(platform.x - platform.width - self.scrollX, platform.y - platform.height, 
-                                platform.x + platform.width - self.scrollX, platform.y + platform.height)
+        canvas.create_rectangle(mode.player.x - mode.player.size , mode.player.y - mode.player.size , 
+                            mode.player.x + mode.player.size , mode.player.y + mode.player.size )
+        canvas.create_rectangle(mode.ground.x - mode.ground.width, mode.ground.y - mode.ground.height, 
+                               mode.ground.x + mode.ground.width, mode.ground.y + mode.ground.height, fill = "black")
+        canvas.create_oval(mode.width//2 - mode.scrollX, mode.height//2, 
+                            mode.width//2 - 10 - mode.scrollX, mode.height//2 - 10, fill = 'red')
+        for platform in mode.platforms: 
+            canvas.create_rectangle(platform.x - platform.width - mode.scrollX, platform.y - platform.height, 
+                                platform.x + platform.width - mode.scrollX, platform.y + platform.height)
+        canvas.create_oval(mode.goal.x - mode.goal.r - mode.scrollX, mode.goal.y - mode.goal.r ,
+                        mode.goal.x + mode.goal.r - mode.scrollX, mode.goal.y + mode.goal.r , fill = "red")
+
+class GameOverMode(Mode):
+    def redrawAll(mode,canvas):
+        canvas.create_text(mode.width//2, mode.height//2, text = "Game Over!", font = "Lato 20")
+        canvas.create_text(mode.width//2, mode.height//2 + 20, text = "Press r to restart!", font = "Lato 16")
+    def keyPressed(mode,event):
+        if (event.key == "r"):
+            mode.app.gameMode.appStarted()
+            mode.app.setActiveMode(mode.app.gameMode)
+
+class WonMode(Mode):
+    def redrawAll(mode,canvas):
+        canvas.create_text(mode.width//2, mode.height//2, text = "You Won!", font = "Lato 20")
+        canvas.create_text(mode.width//2, mode.height//2 + 20, text = "Press r to restart!", font = "Lato 16")
+    def keyPressed(mode,event):
+        if (event.key == "r"):
+            mode.app.gameMode.appStarted()
+            mode.app.setActiveMode(mode.app.gameMode)
         
 
-        
+class beatModalApp(ModalApp):
+    def __init__(self, width, height):
+        super().__init__(width = width, height = height)
+        self.gameMode.pyaudioFlag[0] = False
+    def appStarted(self):
+        self.gameMode = GameMode() 
+        self.wonMode = WonMode()
+        self.gameOverMode = GameOverMode()
+        self.setActiveMode(self.gameMode)
+
 
 
 def drawing_thread(name):
-    myApp = beatApp(width = 500, height = 500)
+    myApp = beatModalApp(width = 500, height = 500)
 
 
 if __name__ == "__main__":
