@@ -6,11 +6,17 @@ import time
 from cmu_112_graphics import *
 from Surface import Surface
 from tkinter import *
+from PIL import Image
+from gameObject import gameObject
 import numpy as np
 
 # cmu 112 graphics from https://www.cs.cmu.edu/~112/notes/notes-animations-part1.html
 
-
+class Spike(gameObject):
+    image = Image.open("spike.png")
+    def __init__(self, x, y, image, size):
+        super().__init__(x,y,size)
+        self.image = Spike.image.resize(size)
 startTime = time.time()
 class BeatCollector(object):
     
@@ -24,10 +30,12 @@ class BeatCollector(object):
         self.volumes = []
         self.total_frames = 0
         self.platforms  = []
+        self.obstacles = []
         self.goal = None
         self.defaultGap = 30
         self.scrollSpeed = 50 
         self.height = 500
+        self.spikeImage = Image.open('spike.png')
 
     def collectBeats(self):
         self.music_source = aubio.source(self.fileName, self.samplingRate, self.hop_size)
@@ -50,7 +58,7 @@ class BeatCollector(object):
 
     def createPlatforms(self):
         beats, volumes = self.collectBeats()
-        defaultY = 250
+        defaultY = 300
         groundHeight = 375
         for i in range(len(beats)):
             if (i == len(beats) - 1):
@@ -64,6 +72,7 @@ class BeatCollector(object):
                 platY = defaultY
                 timeDif = beats[i+1] - beats[i]
                 platSize = round(timeDif * self.scrollSpeed,2)
+                spikeSize = int(platSize * 2)
                 beats[i] = round(beats[i-1] + platSize) + self.defaultGap*2
                 if (volumes[i+1] > volumes[i]):
                     platY = self.platforms[i-1].y - 10
@@ -71,6 +80,8 @@ class BeatCollector(object):
                     platY = self.platforms[i-1].y + 10 
                 if (platY >= groundHeight):
                     platY = self.platforms[i-1].y - 50 
+                if (i %10 == 0 ):
+                    self.obstacles.append(Spike(beats[i], platY - 35, Spike.image, (spikeSize,50)))
                 self.platforms.append(Surface(beats[i], platY, platSize, 10))
 
             # add descending and ascending platforms

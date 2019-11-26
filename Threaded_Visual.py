@@ -8,6 +8,7 @@ from cmu_112_graphics import *
 from Surface import Surface
 from level_generation import BeatCollector 
 from tkinter import *
+from PIL import Image
 import numpy as np
 
 
@@ -59,6 +60,7 @@ class AudioCollector(object):
         stream.stop_stream()
         stream.close()
         p.terminate()
+        
     
     def getBeats(self):
         return self.beats
@@ -94,6 +96,7 @@ class Player(object): # basic player class represented by square
         self.isJumping = False
         self.isMoving = False
         self.isOnPlatform = False
+        self.isFalling = False
     def changeVelocity(self, vx, vy): 
         self.vx = vx 
         self.vy = vy
@@ -123,9 +126,11 @@ class Player(object): # basic player class represented by square
 
 class GameMode(Mode):
     GRAVITY = 3
+    Attempts = 1
     @staticmethod
     def distance(x1,y1,x2,y2):
         return ((x2-x1)**2 + (y2-y1)**2)**0.5
+    
     
     def appStarted(mode):
         mode.pyaudioFlag = [True]
@@ -143,15 +148,26 @@ class GameMode(Mode):
         mode.goal = beatCollector1.getGoal()
         mode.platforms = beatCollector1.getPlatforms() 
         mode.beats = mode.audioTest.getBeats()
+        mode.obstacles = beatCollector1.obstacles
+        mode.spikeImage = mode.loadImage("spike.png")
         mode.counter = 0 
-        mode.timerDelay = 100
+        mode.timerDelay = 50
         mode.score = 0
         mode.player = Player(mode.width//2, mode.height//2 -20, 20)
         mode.scrollX = 0 
         mode.ground = Ground(mode.width//2, mode.height, mode.width//2, mode.width//4)
         mode.platforms.insert(0,Surface(500, 230, 60, 10)) # initial test platform 
     
+    def createObstacles(mode):
+        for obstacle in mode.obstacles:
+            obstacle.image = mode.spikeImage
+            obstacle.resizeImage()
+    
+    def restart(mode):
+        mode.appStarted()
+        GameMode.Attempts +=1 
 
+         
      
     def timerFired(mode):
         # go through beats and move them to the left
@@ -171,19 +187,26 @@ class GameMode(Mode):
             mode.scrollX += 5
         if (mode.player.vy > 0): 
             mode.player.vy += GameMode.GRAVITY 
+            mode.player.isFalling = True
         elif (not mode.player.isOnPlatform and mode.player.vy <= 0):
             mode.player.vy -= -GameMode.GRAVITY 
             ## have to make sure can't go through when holding up key
+            # add more conditions to case on previous state to current state 
         for platform in mode.platforms:
             if (not mode.player.isJumping and (mode.isOnTopOfPlatform(platform) or mode.isOnTopOfGround())):
                 mode.player.isOnPlatform = True 
                 mode.player.vy = 0
+                mode.player.isFalling = False
             else: 
+                mode.player.isFalling = True
                 mode.player.isOnPlatform = False
         
         mode.player.y += mode.player.vy 
+
         mode.player.x += mode.player.vx 
-    
+        for platform in mode.platforms:
+            if (mode.player.collidesWith(platform,mode)):
+                mode.player.y -= mode.player.vy    
     
 
     def movePlayer(mode,dx,dy):
@@ -202,9 +225,12 @@ class GameMode(Mode):
             if (mode.player.collidesWith(platform,mode)):
                mode.gameOver = True
                mode.pyaudioFlag[1] = True
-               mode.app.setActiveMode(mode.app.gameOverMode)
-        
-
+               mode.restart()        
+        for obstacle in mode.obstacles:
+            if (mode.player.collidesWith(obstacle,mode)):
+               mode.gameOver = True
+               mode.pyaudioFlag[1] = True
+               mode.restart()        
 
     def isOnTopOfGround(mode): # keep player on top of the ground
         margin = mode.player.size//4
@@ -227,7 +253,7 @@ class GameMode(Mode):
         
 
     def keyPressed(mode,event):
-        if (mode.gameOver):
+        if (mode.gameOver or mode.counter < 3000):
             return 
         if (event.key == "Right"):
             mode.movePlayer(+5,0)
@@ -240,6 +266,7 @@ class GameMode(Mode):
         elif (event.key == "Up"):
             mode.player.isJumping = True
             mode.player.vy = -15
+            
         elif (event.key == "S"): # speed up scrolling to see rest of level
             mode.scrollX += 1000
 
@@ -254,17 +281,17 @@ class GameMode(Mode):
 
     def clearScreen(mode): # gets rid of beats that are off the screen
         #tempBeats = copy.copy(beats) # creates lots of lists, how to do this more efficiently?
-        newBeats = set()
         newPlatforms = set()
         beats = mode.audioTest.getBeats()
-        for beat in beats: 
-            if (beat.x > 0):
-                newBeats.add(beat)
+        newSpikes = set()
         for platform in mode.platforms:
             if (platform.x - mode.scrollX > 0):
                 newPlatforms.add(platform)
-        mode.beats = newBeats
+        for obstacle in mode.obstacles:
+            if (obstacle.x - mode.scrollX > 0):
+                newSpikes.add(obstacle)
         mode.platforms = newPlatforms
+        mode.obstacles = newSpikes
     
     # cmu 112 graphics from https://www.cs.cmu.edu/~112/notes/notes-animations-part2.html
     def boundsIntersect(mode, boundsA, boundsB):
@@ -301,6 +328,7 @@ class GameMode(Mode):
         font = "Solomon 16")
         canvas.create_text(mode.width//2, 60, text = f"PlayerX: {mode.player.x + mode.scrollX}", 
         font = "Solomon 16")
+        canvas.create_text(100, 50, text = f"Attempts: {GameMode.Attempts}", font = "Lato 16")
         canvas.create_rectangle(mode.player.x - mode.player.size , mode.player.y - mode.player.size , 
                             mode.player.x + mode.player.size , mode.player.y + mode.player.size )
         canvas.create_rectangle(mode.ground.x - mode.ground.width, mode.ground.y - mode.ground.height, 
@@ -312,6 +340,9 @@ class GameMode(Mode):
                                 platform.x + platform.width - mode.scrollX, platform.y + platform.height)
         canvas.create_oval(mode.goal.x - mode.goal.r - mode.scrollX, mode.goal.y - mode.goal.r ,
                         mode.goal.x + mode.goal.r - mode.scrollX, mode.goal.y + mode.goal.r , fill = "red")
+        for obstacle in mode.obstacles:
+            canvas.create_image(obstacle.x - mode.scrollX, obstacle.y , 
+                        image = ImageTk.PhotoImage(obstacle.image))
 
 class GameOverMode(Mode):
     def redrawAll(mode,canvas):
