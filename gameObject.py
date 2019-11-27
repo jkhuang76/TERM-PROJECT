@@ -1,4 +1,9 @@
-class gameObject(object):
+from cmu_112_graphics import *
+from tkinter import *
+from PIL import Image
+
+# cmu 112 graphics https://www.cs.cmu.edu/~112/notes/notes-animations-part1.html
+class GameObject(object):
 
     def __init__(self, x,y, size):
         self.x = x
@@ -13,4 +18,6 @@ class gameObject(object):
     
     def __repr__(self):
         return f"{self.x}, {self.y} with {gameObject.image}"
+    def draw(self, canvas, app):
+        canvas.create_image(self.x - app.scrollX, self.y, image = ImageTk.PhotoImage(self.image))
 

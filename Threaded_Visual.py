@@ -4,12 +4,15 @@ import aubio
 import random
 import copy
 import time
+import os 
 from cmu_112_graphics import *
 from Surface import Surface
-from level_generation import BeatCollector 
+from GameObject import GameObject
+from Level_Generation import BeatCollector 
 from tkinter import *
 from PIL import Image
 import numpy as np
+from numpy import diff, median
 
 
 # cmu 112 graphics from https://www.cs.cmu.edu/~112/notes/notes-animations-part1.html
@@ -24,9 +27,9 @@ samplerate = 48000
 a_source = aubio.source(filename, samplerate, hop_s)
 samplerate = a_source.samplerate
 
-# create aubio tempo detection
+# create aubio tempo detection # 
 a_tempo = aubio.tempo("default", win_s, hop_s, samplerate)
-
+spec_tempo = aubio.tempo("specdiff", win_s, hop_s, samplerate) #spectral difference method
 class AudioCollector(object):
     #moved pyaudio stuff into class
     def __init__(self):
@@ -60,7 +63,20 @@ class AudioCollector(object):
         stream.stop_stream()
         stream.close()
         p.terminate()
-        
+    
+    def beats_to_bpm(self): # bpm extract modeled off https://github.com/aubio/aubio/tree/master/python/demos 
+        b_source = aubio.source(filename, samplerate, hop_s) # different source for bpm analysis 
+        while True:  # demo_bpm_extract.py
+            samples, read = b_source()
+            is_beat = spec_tempo(samples)
+            if (is_beat):
+                this_beat = spec_tempo.get_last_s()
+                self.beats.append(this_beat)
+            if (read < hop_s):
+                break
+        if (len(self.beats) > 4):
+            bpms = 60./diff(self.beats)# convert beats into periods 
+            return median(bpms)
     
     def getBeats(self):
         return self.beats
@@ -78,6 +94,13 @@ class Beat(object):
     def __repr__(self):
         return f"Beat at {self.x}, {self.y} with radius {self.r}"
 
+class Button(GameObject):
+    def getBounds(self):
+        (x0,y0,x1,y1) = (self.x - self.width//2 , self.y - self.height//2,
+                        self.x + self.width//2 , self.y + self.height//2)
+        return (x0,y0,x1,y1)
+
+
 
 
 class Ground(Surface):
@@ -92,7 +115,7 @@ class Player(object): # basic player class represented by square
         self.y = y 
         self.size = size
         self.vx = 0
-        self.vy = 0 #test of gravity
+        self.vy = 0 
         self.isJumping = False
         self.isMoving = False
         self.isOnPlatform = False
@@ -105,8 +128,6 @@ class Player(object): # basic player class represented by square
                             self.x + self.size, self.y + self.size)
         return (x0,y0,x1,y1)
 
-    def move(self):
-        self.x += self.speed
 
     def collidesWith(self,other,app):
         playerBounds = self.getBounds()
@@ -125,7 +146,7 @@ class Player(object): # basic player class represented by square
 
 
 class GameMode(Mode):
-    GRAVITY = 3
+    GRAVITY = 5
     Attempts = 1
     @staticmethod
     def distance(x1,y1,x2,y2):
@@ -138,30 +159,26 @@ class GameMode(Mode):
         mode.pyaudioFlag.append(mode.gameOver)
         global streamThread
         mode.audioTest = AudioCollector()
-        
         streamThread = threading.Thread(target=mode.audioTest.pyaudio_stream_thread, args=(mode.pyaudioFlag,))
         streamThread.start()
         threads.append(streamThread)
         beatCollector1 = BeatCollector("Another One Bites The Dust.wav", 48000)
+        mode.bpm = mode.audioTest.beats_to_bpm()
+        mode.scrollSpeed = int((mode.bpm/60) * 10)  # beats per second then multiplied based on timerDelay
         beatsTime = beatCollector1.collectBeats()
         beatCollector1.createPlatforms()
         mode.goal = beatCollector1.getGoal()
         mode.platforms = beatCollector1.getPlatforms() 
-        mode.beats = mode.audioTest.getBeats()
         mode.obstacles = beatCollector1.obstacles
         mode.spikeImage = mode.loadImage("spike.png")
         mode.counter = 0 
-        mode.timerDelay = 50
+        mode.timerDelay = 100
         mode.score = 0
         mode.player = Player(mode.width//2, mode.height//2 -20, 20)
         mode.scrollX = 0 
+        mode.isPaused = False
         mode.ground = Ground(mode.width//2, mode.height, mode.width//2, mode.width//4)
-        mode.platforms.insert(0,Surface(500, 230, 60, 10)) # initial test platform 
-    
-    def createObstacles(mode):
-        for obstacle in mode.obstacles:
-            obstacle.image = mode.spikeImage
-            obstacle.resizeImage()
+
     
     def restart(mode):
         mode.appStarted()
@@ -169,22 +186,20 @@ class GameMode(Mode):
 
          
      
-    def timerFired(mode):
+    def timerFired(mode): # future implementation to add, key held down 
         # go through beats and move them to the left
         if (mode.gameOver):
             return 
         if (mode.counter >= 3000 and mode.counter %1000 == 0):
             mode.score += 5
         mode.counter += mode.timerDelay
-        #for beat in mode.beats: 
-            #beat.move(-10,0)
         mode.update()
         mode.clearScreen()
         mode.checkCollisions()
 
     def update(mode):
         if (mode.counter >= 3000):
-            mode.scrollX += 5
+            mode.scrollX += mode.scrollSpeed
         if (mode.player.vy > 0): 
             mode.player.vy += GameMode.GRAVITY 
             mode.player.isFalling = True
@@ -242,7 +257,6 @@ class GameMode(Mode):
         return False
 
     def isOnTopOfPlatform(mode,platform): # keep player on top of the platform 
-        #right now the player can go through the platform when its just scrolling 
         (platx0, platy0, platx1, platy1)= platform.getBounds(mode)
         (Px0, Py0, Px1, Py1) = playerBounds = mode.player.getBounds()
         if (not mode.boundsIntersect((platx0, platy0, platx1, platy1),(Px0, Py0, Px1, Py1))):
@@ -265,10 +279,13 @@ class GameMode(Mode):
             mode.player.vx = -5
         elif (event.key == "Up"):
             mode.player.isJumping = True
-            mode.player.vy = -15
+            mode.player.vy = -20
             
         elif (event.key == "S"): # speed up scrolling to see rest of level
             mode.scrollX += 1000
+        elif (event.key == "Escape"):
+            mode.isPaused = True
+            mode.app.setActiveMode(mode.app.splashScreenMode)
 
     def keyReleased(mode,event):
         if (event.key == "Right" or event.key == "Left"):
@@ -293,24 +310,17 @@ class GameMode(Mode):
         mode.platforms = newPlatforms
         mode.obstacles = newSpikes
     
-    # cmu 112 graphics from https://www.cs.cmu.edu/~112/notes/notes-animations-part2.html
+    #  from https://www.cs.cmu.edu/~112/notes/notes-animations-part2.html
     def boundsIntersect(mode, boundsA, boundsB):
         (ax0, ay0, ax1, ay1) = boundsA
         (bx0, by0, bx1, by1) = boundsB
         return ((ax1 >= bx0) and (bx1 >= ax0) and
                 (ay1 >= by0) and (by1 >= ay0))
 
-    def mousePressed(mode, event): # click to remove beat and tap along to the beat
-        # a little bit messed up by the scroll
-        newBeats = set()
-        for beat in mode.beats: 
-            if (event.x in range(80,120) and GameMode.distance(beat.x, beat.y, event.x, event.y) <= beat.r):
-                beats.remove(beat)
-                mode.score += 5
-
-        
 
     def redrawAll(mode,canvas): # draw player and beats
+        if (mode.isPaused):
+            return
         canvas.create_line(100 - mode.scrollX, 0, 100 - mode.scrollX, mode.height) #baseline
         #countdown before game starts
         if (mode.counter == 1000):
@@ -320,10 +330,6 @@ class GameMode(Mode):
         elif (mode.counter == 3000):
             canvas.create_text(mode.width//2, mode.height//2, text = "1", font = "Solomon 30 ")
 
-        for beat in mode.beats: 
-            
-            canvas.create_oval(beat.x - beat.r - mode.scrollX, beat.y - beat.r, 
-                                beat.x + beat.r - mode.scrollX, beat.y + beat.r)
         canvas.create_text(mode.width//2, 30, text = f"Score: {mode.score}", 
         font = "Solomon 16")
         canvas.create_text(mode.width//2, 60, text = f"PlayerX: {mode.player.x + mode.scrollX}", 
@@ -333,16 +339,40 @@ class GameMode(Mode):
                             mode.player.x + mode.player.size , mode.player.y + mode.player.size )
         canvas.create_rectangle(mode.ground.x - mode.ground.width, mode.ground.y - mode.ground.height, 
                                mode.ground.x + mode.ground.width, mode.ground.y + mode.ground.height, fill = "black")
-        canvas.create_oval(mode.width//2 - mode.scrollX, mode.height//2, 
-                            mode.width//2 - 10 - mode.scrollX, mode.height//2 - 10, fill = 'red')
         for platform in mode.platforms: 
             canvas.create_rectangle(platform.x - platform.width - mode.scrollX, platform.y - platform.height, 
                                 platform.x + platform.width - mode.scrollX, platform.y + platform.height)
         canvas.create_oval(mode.goal.x - mode.goal.r - mode.scrollX, mode.goal.y - mode.goal.r ,
                         mode.goal.x + mode.goal.r - mode.scrollX, mode.goal.y + mode.goal.r , fill = "red")
         for obstacle in mode.obstacles:
-            canvas.create_image(obstacle.x - mode.scrollX, obstacle.y , 
-                        image = ImageTk.PhotoImage(obstacle.image))
+            obstacle.draw(canvas, mode)
+
+class SplashScreenMode(Mode):
+    background = Image.open("background.png")
+    title = Image.open("title2.png")
+    play = Image.open("play.png")
+    def appStarted(mode):
+        SplashScreenMode.background = SplashScreenMode.background.resize((500,500))
+        SplashScreenMode.title = SplashScreenMode.title.resize((400,100))
+        mode.playButton = Button(mode.width//2, mode.height//2, SplashScreenMode.play.size)
+
+    def redrawAll(mode,canvas): 
+        canvas.create_image(mode.width//2,mode.height//2,image = ImageTk.PhotoImage(SplashScreenMode.background))
+        canvas.create_image(mode.width//2,mode.height//10,image = ImageTk.PhotoImage(SplashScreenMode.title))
+        canvas.create_image(mode.width//2,mode.height//2,image = ImageTk.PhotoImage(SplashScreenMode.play))
+
+    def mouseInBounds(mode, eventx, eventy, bounds):
+        # check mouse position is inside bounds
+        (x0,y0,x1,y1) = bounds
+        return (eventx >= x0 and eventx <= x1 and 
+                eventy >= y0 and eventy <= y1)
+    def mousePressed(mode,event):
+        if (mode.mouseInBounds(event.x, event.y, mode.playButton.getBounds())):
+            mode.app.gameMode.isPaused = False
+            mode.app.setActiveMode(mode.app.gameMode)
+
+
+
 
 class GameOverMode(Mode):
     def redrawAll(mode,canvas):
@@ -351,17 +381,32 @@ class GameOverMode(Mode):
     def keyPressed(mode,event):
         if (event.key == "r"):
             mode.app.gameMode.appStarted()
-            mode.app.setActiveMode(mode.app.gameMode)
+            mode.app.setActiveMode(mode.app.splashScreenMode)
 
 class WonMode(Mode):
+    def appStarted(mode):
+        mode.highScore = mode.getScore("score.txt")
+
     def redrawAll(mode,canvas):
         canvas.create_text(mode.width//2, mode.height//2, text = "You Won!", font = "Lato 20")
         canvas.create_text(mode.width//2, mode.height//2 + 40, text = f"Score: {mode.app.gameMode.score}", font = "Lato 20")
+        canvas.create_text(mode.width//2, mode.height//2 + 60, text = f"High Score: {mode.highScore}", font = "Lato 20")
         canvas.create_text(mode.width//2, mode.height//2 + 20, text = "Press r to restart!", font = "Lato 16")
     def keyPressed(mode,event):
         if (event.key == "r"):
+            mode.updateScore("score.txt")
             mode.app.gameMode.appStarted()
-            mode.app.setActiveMode(mode.app.gameMode)
+            mode.app.setActiveMode(mode.app.splashScreenMode)
+
+    # modeled after functions in https://www.cs.cmu.edu/~112/notes/notes-strings.html#basicFileIO
+    def getScore(mode,path):
+        with open(path) as file: 
+            return file.read()
+    def updateScore(mode, path):
+        with open(path, "wt") as file: 
+            currScore = (mode.app.gameMode.score)
+            if (currScore > int(mode.highScore)):
+                file.write(str(currScore))
         
 
 class beatModalApp(ModalApp):
@@ -372,7 +417,8 @@ class beatModalApp(ModalApp):
         self.gameMode = GameMode() 
         self.wonMode = WonMode()
         self.gameOverMode = GameOverMode()
-        self.setActiveMode(self.gameMode)
+        self.splashScreenMode = SplashScreenMode()
+        self.setActiveMode(self.splashScreenMode)
 
 
 
