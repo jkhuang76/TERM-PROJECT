@@ -9,41 +9,40 @@ from cmu_112_graphics import *
 from Surface import Surface
 from GameObject import GameObject
 from Level_Generation import BeatCollector 
+from Level_Generation import Coin
 from tkinter import *
 from PIL import Image
 import numpy as np
 from numpy import diff, median
 
 
+
 # cmu 112 graphics from https://www.cs.cmu.edu/~112/notes/notes-animations-part1.html
-win_s = 1024                # fft size
-hop_s = win_s // 2    
 
-
-filename = "Another One Bites The Dust.wav"
-
-samplerate = 48000
-
-a_source = aubio.source(filename, samplerate, hop_s)
-samplerate = a_source.samplerate
-
-# create aubio tempo detection # 
-a_tempo = aubio.tempo("default", win_s, hop_s, samplerate)
-spec_tempo = aubio.tempo("specdiff", win_s, hop_s, samplerate) #spectral difference method
 class AudioCollector(object):
     #moved pyaudio stuff into class
     def __init__(self):
         self.beats = []
+        self.win_s = 1024                # fft size
+        self.hop_s = self.win_s // 2    
+        self.filename = "Another One Bites The Dust.wav"
+        self.samplerate = 48000
+        self.a_source = aubio.source(self.filename, self.samplerate, self.hop_s)
+        self.samplerate = self.a_source.samplerate
+        self.pyaudioFlag = [True]
+        # create aubio tempo detection # 
+        self.a_tempo = aubio.tempo("default", self.win_s, self.hop_s, self.samplerate)
+        self.spec_tempo = aubio.tempo("specdiff", self.win_s, self.hop_s, self.samplerate) #spectral difference method
     # pyaudio callback and stream method from https://github.com/aubio/aubio/tree/master/python/demos
     # specifically tap_the_beat demo
     def pyaudio_callback(self,_in_data, _frame_count, _time_info, _status):
-        samples, read = a_source()
-        is_beat = a_tempo(samples)
+        samples, read = self.a_source()
+        is_beat = self.a_tempo(samples)
         #if is_beat:
             #self.beats.append((Beat(500 + self.i * 30, 200, 10)))
              # hard coded based on current canvas
         audiobuf = samples.tobytes()
-        if read < hop_s:
+        if read < self.hop_s:
             return (audiobuf, pyaudio.paComplete)
         return (audiobuf, pyaudio.paContinue)
 
@@ -51,28 +50,29 @@ class AudioCollector(object):
     def pyaudio_stream_thread(self,flagList):
         p = pyaudio.PyAudio()
         pyaudio_format = pyaudio.paFloat32
-        frames_per_buffer = hop_s
+        frames_per_buffer = self.hop_s
         n_channels = 1
-        stream = p.open(format=pyaudio_format, channels=n_channels, rate=samplerate,
+        stream = p.open(format=pyaudio_format, channels=n_channels, rate=self.samplerate,
                 output=True, frames_per_buffer=frames_per_buffer,
                 stream_callback=self.pyaudio_callback)
 
         stream.start_stream()
         while flagList[0] and not flagList[1] and stream.is_active():
             time.sleep(0.1)
+        print("bye")
         stream.stop_stream()
         stream.close()
         p.terminate()
     
     def beats_to_bpm(self): # bpm extract modeled off https://github.com/aubio/aubio/tree/master/python/demos 
-        b_source = aubio.source(filename, samplerate, hop_s) # different source for bpm analysis 
+        b_source = aubio.source(self.filename, self.samplerate, self.hop_s) # different source for bpm analysis 
         while True:  # demo_bpm_extract.py
             samples, read = b_source()
-            is_beat = spec_tempo(samples)
+            is_beat = self.spec_tempo(samples)
             if (is_beat):
-                this_beat = spec_tempo.get_last_s()
+                this_beat = self.spec_tempo.get_last_s()
                 self.beats.append(this_beat)
-            if (read < hop_s):
+            if (read < self.hop_s):
                 break
         if (len(self.beats) > 4):
             bpms = 60./diff(self.beats)# convert beats into periods 
@@ -100,7 +100,13 @@ class Button(GameObject):
                         self.x + self.width//2 , self.y + self.height//2)
         return (x0,y0,x1,y1)
 
-
+class Star(GameObject):
+    image = Image.open("StarB.png")
+    def __init__(self, x, y, image, size):
+        super().__init__(x,y,size)
+        self.image = Star.image.resize(size)
+    def draw(self, canvas):
+        canvas.create_image(self.x, self.y, image = ImageTk.PhotoImage(self.image))
 
 
 class Ground(Surface):
@@ -156,32 +162,55 @@ class GameMode(Mode):
     def appStarted(mode):
         mode.pyaudioFlag = [True]
         mode.gameOver = False
-        mode.pyaudioFlag.append(mode.gameOver)
+        #mode.pyaudioFlag.append(mode.gameOver)
+
         global streamThread
         mode.audioTest = AudioCollector()
-        streamThread = threading.Thread(target=mode.audioTest.pyaudio_stream_thread, args=(mode.pyaudioFlag,))
+        mode.audioTest.pyaudioFlag.append(mode.gameOver) #has to use a different flag to properly restart 
+        streamThread = threading.Thread(target=mode.audioTest.pyaudio_stream_thread, args=(mode.audioTest.pyaudioFlag,))
         streamThread.start()
         threads.append(streamThread)
-        beatCollector1 = BeatCollector("Another One Bites The Dust.wav", 48000)
+        mode.beatCollector1 = BeatCollector("Another One Bites The Dust.wav", 48000)
         mode.bpm = mode.audioTest.beats_to_bpm()
         mode.scrollSpeed = int((mode.bpm/60) * 10)  # beats per second then multiplied based on timerDelay
-        beatsTime = beatCollector1.collectBeats()
-        beatCollector1.createPlatforms()
-        mode.goal = beatCollector1.getGoal()
-        mode.platforms = beatCollector1.getPlatforms() 
-        mode.obstacles = beatCollector1.obstacles
+        beatsTime = mode.beatCollector1.collectBeats()
+        mode.beatCollector1.createPlatforms()
+        mode.beatCollector1.createCoins()
+        mode.goal = mode.beatCollector1.getGoal()
+        mode.platforms = mode.beatCollector1.getPlatforms() 
+        mode.obstacles = mode.beatCollector1.obstacles
+        mode.jumps = mode.beatCollector1.createJumps()
         mode.spikeImage = mode.loadImage("spike.png")
         mode.counter = 0 
         mode.timerDelay = 100
         mode.score = 0
+        mode.coins = mode.beatCollector1.getCoins()
+        mode.coinCount = 0
         mode.player = Player(mode.width//2, mode.height//2 -20, 20)
         mode.scrollX = 0 
         mode.isPaused = False
         mode.ground = Ground(mode.width//2, mode.height, mode.width//2, mode.width//4)
+    def appStopped(mode):
+        mode.pyaudioFlag[0] = False
+        
 
     
     def restart(mode):
-        mode.appStarted()
+        mode.counter = 0
+        mode.score = 0
+        mode.platforms = mode.beatCollector1.getPlatforms()
+        mode.obstacles = mode.beatCollector1.obstacles
+        mode.coins = mode.beatCollector1.getCoins()
+        mode.gameOver = False
+        mode.audioTest = AudioCollector()
+        mode.audioTest.pyaudioFlag.append(mode.gameOver)
+        global streamThread
+        streamThread = threading.Thread(target=mode.audioTest.pyaudio_stream_thread, args=(mode.audioTest.pyaudioFlag,))
+        streamThread.start()
+        print(len(threads))
+        mode.player.x, mode.player.y = mode.width//2, mode.height//2
+        mode.scrollX = 0 
+        mode.player = Player(mode.width//2, mode.height//2 -20, 20)
         GameMode.Attempts +=1 
 
          
@@ -198,6 +227,7 @@ class GameMode(Mode):
         mode.checkCollisions()
 
     def update(mode):
+        velocityReducer = 8
         if (mode.counter >= 3000):
             mode.scrollX += mode.scrollSpeed
         if (mode.player.vy > 0): 
@@ -217,11 +247,18 @@ class GameMode(Mode):
                 mode.player.isOnPlatform = False
         
         mode.player.y += mode.player.vy 
+        
 
         mode.player.x += mode.player.vx 
         for platform in mode.platforms:
             if (mode.player.collidesWith(platform,mode)):
-                mode.player.y -= mode.player.vy    
+                if(mode.player.vy > 30):
+                    mode.player.vy -= velocityReducer
+                mode.player.y -= mode.player.vy  
+        if (mode.player.collidesWith(mode.ground, mode)):
+            if(mode.player.vy > 30):
+                    mode.player.vy -= velocityReducer
+            mode.player.y -= mode.player.vy
     
 
     def movePlayer(mode,dx,dy):
@@ -234,25 +271,41 @@ class GameMode(Mode):
     def checkCollisions(mode):
         if (mode.player.collidesWith(mode.goal,mode)):
             mode.gameOver = True
-            mode.pyaudioFlag[1] = True
+            mode.audioTest.pyaudioFlag[1] = True
+            mode.audioTest.pyaudioFlag[0] = False
             mode.app.setActiveMode(mode.app.wonMode)
         for platform in mode.platforms:
             if (mode.player.collidesWith(platform,mode)):
-               mode.gameOver = True
-               mode.pyaudioFlag[1] = True
-               mode.restart()        
+                print(mode.player.x, mode.player.y)
+                print(platform.y)
+                mode.gameOver = True
+                mode.audioTest.pyaudioFlag[0] = False
+                mode.audioTest.pyaudioFlag[1] = True
+                mode.restart()        
         for obstacle in mode.obstacles:
             if (mode.player.collidesWith(obstacle,mode)):
                mode.gameOver = True
-               mode.pyaudioFlag[1] = True
-               mode.restart()        
+               mode.audioTest.pyaudioFlag[1] = True
+               mode.audioTest.pyaudioFlag[0] = False
+               mode.restart()     
+        newCoins = set() 
+        for coin in mode.coins: 
+            if (mode.player.collidesWith(coin,mode)):
+                mode.coinCount += 1
+            else:
+                newCoins.add(coin)
+        mode.coins = newCoins
+
+        for jump in mode.jumps: 
+            if (mode.player.collidesWith(jump, mode)):
+                mode.player.vy = -50
 
     def isOnTopOfGround(mode): # keep player on top of the ground
         margin = mode.player.size//4
         (gx0, gy0, gx1, gy1)= mode.ground.getBounds()
         (Px0, Py0, Px1, Py1) = playerBounds = mode.player.getBounds()
         if (not mode.boundsIntersect((gx0, gy0, gx1, gy1),(Px0, Py0, Px1, Py1))):
-            if (Px0 >= gx0  and Px1 <= gx1 and Py1 <= gy0 and Py1 > gy0 - mode.player.size - margin): 
+            if (Px0 >= gx0  and Px1 <= gx1 and Py1 <= gy0 and Py1 > gy0 - mode.player.size - 10): 
                 return True
         return False
 
@@ -263,8 +316,6 @@ class GameMode(Mode):
             if (Px0 >= platx0 - mode.player.size and Px1 <= platx1 + mode.player.size and Py1 <= platy0 and Py1 > platy0 - mode.player.size): 
                 return True
         return False
-
-        
 
     def keyPressed(mode,event):
         if (mode.gameOver or mode.counter < 3000):
@@ -285,6 +336,7 @@ class GameMode(Mode):
             mode.scrollX += 1000
         elif (event.key == "Escape"):
             mode.isPaused = True
+            mode.audioTest.pyaudioFlag[0] = False
             mode.app.setActiveMode(mode.app.splashScreenMode)
 
     def keyReleased(mode,event):
@@ -339,13 +391,21 @@ class GameMode(Mode):
                             mode.player.x + mode.player.size , mode.player.y + mode.player.size )
         canvas.create_rectangle(mode.ground.x - mode.ground.width, mode.ground.y - mode.ground.height, 
                                mode.ground.x + mode.ground.width, mode.ground.y + mode.ground.height, fill = "black")
-        for platform in mode.platforms: 
-            canvas.create_rectangle(platform.x - platform.width - mode.scrollX, platform.y - platform.height, 
-                                platform.x + platform.width - mode.scrollX, platform.y + platform.height)
+        for platform in mode.platforms: # draw only when seen on screen
+            if (platform.x - platform.width - mode.scrollX >= 0 and platform.x + platform.width - mode.scrollX <= 500):
+                canvas.create_rectangle(platform.x - platform.width - mode.scrollX, platform.y - platform.height, 
+                                    platform.x + platform.width - mode.scrollX, platform.y + platform.height)
         canvas.create_oval(mode.goal.x - mode.goal.r - mode.scrollX, mode.goal.y - mode.goal.r ,
                         mode.goal.x + mode.goal.r - mode.scrollX, mode.goal.y + mode.goal.r , fill = "red")
         for obstacle in mode.obstacles:
-            obstacle.draw(canvas, mode)
+            if (obstacle.x - obstacle.width - mode.scrollX >= 0 and obstacle.x + obstacle.width - mode.scrollX <= 500):
+                obstacle.draw(canvas, mode)
+        for jump in mode.jumps:
+            jump.draw(canvas,mode)
+        for coin in mode.coins:
+            if (coin.x - coin.width - mode.scrollX >= 0 and coin.x + coin.width - mode.scrollX <= 500):
+                coin.draw(canvas,mode)
+
 
 class SplashScreenMode(Mode):
     background = Image.open("background.png")
@@ -382,21 +442,38 @@ class GameOverMode(Mode):
         if (event.key == "r"):
             mode.app.gameMode.appStarted()
             mode.app.setActiveMode(mode.app.splashScreenMode)
+            
 
 class WonMode(Mode):
     def appStarted(mode):
         mode.highScore = mode.getScore("score.txt")
+        mode.stars = []
+        print(mode.app.gameMode.coinCount)
+        if (mode.app.gameMode.coinCount == 1):
+            mode.stars = [Star(mode.width//2 - 30, mode.height//2 + 100, Star.image, (30,30))]
+        elif (mode.app.gameMode.coinCount == 2):
+            mode.stars = [Star(mode.width//2 - 30, mode.height//2 + 100, Star.image, (30,30))]
+            mode.stars.append(Star(mode.width//2 , mode.height//2 + 100, Star.image, (30,30)))
+        elif (mode.app.gameMode.coinCount == 3):
+            mode.stars = [Star(mode.width//2 - 30, mode.height//2 + 100, Star.image, (30,30))]
+            mode.stars.append(Star(mode.width//2 , mode.height//2 + 100, Star.image, (30,30)))
+            mode.stars.append(Star(mode.width//2 + 30, mode.height//2 + 100, Star.image, (30,30)))
+        print(len(mode.stars))
 
     def redrawAll(mode,canvas):
         canvas.create_text(mode.width//2, mode.height//2, text = "You Won!", font = "Lato 20")
         canvas.create_text(mode.width//2, mode.height//2 + 40, text = f"Score: {mode.app.gameMode.score}", font = "Lato 20")
         canvas.create_text(mode.width//2, mode.height//2 + 60, text = f"High Score: {mode.highScore}", font = "Lato 20")
         canvas.create_text(mode.width//2, mode.height//2 + 20, text = "Press r to restart!", font = "Lato 16")
+        for star in mode.stars:
+            star.draw(canvas)
     def keyPressed(mode,event):
         if (event.key == "r"):
             mode.updateScore("score.txt")
-            mode.app.gameMode.appStarted()
+            #mode.app.gameMode.appStarted()
             mode.app.setActiveMode(mode.app.splashScreenMode)
+    def modeDeactivated(mode):
+        mode.app.gameMode.restart()
 
     # modeled after functions in https://www.cs.cmu.edu/~112/notes/notes-strings.html#basicFileIO
     def getScore(mode,path):
@@ -410,9 +487,11 @@ class WonMode(Mode):
         
 
 class beatModalApp(ModalApp):
-    def __init__(self, width, height):
-        super().__init__(width = width, height = height)
-        self.gameMode.pyaudioFlag[0] = False
+    #def __init__(self, width, height):
+       # super().__init__(width = width, height = height)
+        #self.gameMode.pyaudioFlag[0] = False
+    def appStopped(self):
+        self.gameMode.audioTest.pyaudioFlag[0] = False
     def appStarted(self):
         self.gameMode = GameMode() 
         self.wonMode = WonMode()
@@ -430,7 +509,6 @@ if __name__ == "__main__":
     
 
     threads = list()
-    
     appThread = threading.Thread(target = drawing_thread, args=(1,))
     threads.append(appThread)
     appThread.start()

@@ -19,6 +19,18 @@ class Spike(GameObject):
         super().__init__(x,y,size)
         self.image = Spike.image.resize(size)
 startTime = time.time()
+
+class JumpPad(GameObject):
+    image = Image.open("YellowPad.png")
+    def __init__(self,x,y,image, size):
+        super().__init__(x,y,size)
+        self.image = JumpPad.image.resize(size)
+
+class Coin(GameObject):
+    image = Image.open("SecretCoin.png")
+    def __init__(self,x,y,image, size):
+        super().__init__(x,y,size)
+        self.image = Coin.image.resize(size)
 class BeatCollector(object):
     
     def __init__(self, fileName, samplingRate):
@@ -32,8 +44,10 @@ class BeatCollector(object):
         self.total_frames = 0
         self.platforms  = []
         self.obstacles = []
+        self.jumps = []
+        self.coins = set()
         self.goal = None
-        self.defaultGap = 30
+        self.defaultGap = 50
         self.bpm = self.beats_to_bpm()
         self.scrollSpeed = int((self.bpm/60) *10)
         self.height = 500
@@ -88,7 +102,8 @@ class BeatCollector(object):
             else: 
                 platY = defaultY
                 timeDif = beats[i+1] - beats[i]
-                platWidth = round(timeDif * self.scrollSpeed,2) # how wide the platform is based on how fast the scrolling is and time dif
+                platWidth = round(timeDif * self.scrollSpeed,2)
+                platWidth *= 2 # how wide the platform is based on how fast the scrolling is and time dif
                 spikeSize = int(platWidth * 2)
                 beats[i] = round(beats[i-1] + platWidth) + self.defaultGap*2
                 # add descending and ascending platforms
@@ -99,18 +114,54 @@ class BeatCollector(object):
                 if (platY >= groundHeight):
                     platY = self.platforms[i-1].y - 50 
                     self.obstacles.append(Spike(beats[i], platY - 35, Spike.image, (spikeSize,spikeHeight)))
+                    newX = ((beats[i]+1 + beats[i+1])/2) + self.defaultGap + platWidth
+                    self.obstacles.append(Spike(newX, 375 - spikeHeight/2, Spike.image, (spikeSize, spikeHeight)))
                 if (i %10 == 0 ):
                     spikeHeight = int(abs(volumes[i])* 10)
-                    if spikeHeight > 50:
+                    if spikeHeight > 50 or spikeHeight < 10:
                         spikeHeight = 30
                     self.obstacles.append(Spike(beats[i], platY - 35, Spike.image, (spikeSize,spikeHeight)))
                 self.platforms.append(Surface(beats[i], platY, platWidth, 10))
+    def createJumps(self):
+        beats, volumes = self.collectBeats()
+        groundHeight = 375
+        for i in range(len(beats)-1):
+            if i == 0: 
+                self.jumps.append(JumpPad(beats[i], 280, JumpPad.image, (30,30)))
+            elif (i==5):
+                jumpX = (beats[i] + beats[i+1])//2
+                jumpY = random.randint(325, 350)
+                self.jumps.append(JumpPad(jumpX, jumpY, JumpPad.image, (30,30)))
+        return self.jumps
 
+    def createCoins(self):
+        beats, volumes = self.collectBeats() 
+        counter = 0
+        groundHeight = 375
+        for i in range(len(self.platforms)):
+            if (i == (len(self.platforms)//3)):
+                if (self.platforms[i].y >= 325 ):
+                    self.coins.add(Coin(beats[i], 100, Coin.image, (50,50)))
+                else: 
+                    self.coins.add(Coin(beats[i], 150, Coin.image, (50,50)))
+            elif (i == int(len(self.platforms)* (2/3))):
+                if (self.platforms[i].width < 30):
+                    self.coins.add(Coin(beats[i], self.platforms[i].y - 85, Coin.image,(50,50)))
+            elif (i == len(self.platforms) - 50):
+                if (self.platforms[i].y < 300):
+                    self.coins.add(Coin(beats[i], self.platforms[i].y + 30, Coin.image, (50,50) ))
+                else: 
+                    self.coins.add(Coin(beats[i], self.platforms[i].y - 100, Coin.image, (50,50)))
+        for coin in self.coins:
+            print(coin.x)
+                
     
     def getPlatforms(self):
         return self.platforms
     def getGoal(self):
         return self.goal
+    def getCoins(self):
+        return self.coins
 
 class Goal(object):
     def __init__(self, x, y, r): 
