@@ -8,6 +8,7 @@ import os
 from cmu_112_graphics import *
 from Surface import Surface
 from GameObject import GameObject
+from Portal import Portal, OnPortal, OffPortal
 from Level_Generation import BeatCollector 
 from Level_Generation import Coin
 from tkinter import *
@@ -101,12 +102,15 @@ class Button(GameObject):
         return (x0,y0,x1,y1)
 
 class Star(GameObject):
-    image = Image.open("StarB.png")
+    colorImage = Image.open("StarB.png")
+    outlineImage = Image.open("StarOutline.png")
     def __init__(self, x, y, image, size):
         super().__init__(x,y,size)
-        self.image = Star.image.resize(size)
+        self.image = image.resize(size)
     def draw(self, canvas):
         canvas.create_image(self.x, self.y, image = ImageTk.PhotoImage(self.image))
+    def resize(self):
+        self.image = self.image.resize(self.size)
 
 
 class Ground(Surface):
@@ -152,8 +156,11 @@ class Player(object): # basic player class represented by square
 
 
 class GameMode(Mode):
-    GRAVITY = 5
+    GRAVITY = 6
     Attempts = 1
+    background = Image.open("bg-banner2.jpg")
+    complete = Image.open("levelComplete2.png")
+    complete = complete.resize((500,100))
     @staticmethod
     def distance(x1,y1,x2,y2):
         return ((x2-x1)**2 + (y2-y1)**2)**0.5
@@ -163,7 +170,6 @@ class GameMode(Mode):
         mode.pyaudioFlag = [True]
         mode.gameOver = False
         #mode.pyaudioFlag.append(mode.gameOver)
-
         global streamThread
         mode.audioTest = AudioCollector()
         mode.audioTest.pyaudioFlag.append(mode.gameOver) #has to use a different flag to properly restart 
@@ -177,9 +183,17 @@ class GameMode(Mode):
         mode.beatCollector1.createPlatforms()
         mode.beatCollector1.createCoins()
         mode.goal = mode.beatCollector1.getGoal()
+        mode.goalCounter = 0
         mode.platforms = mode.beatCollector1.getPlatforms() 
         mode.obstacles = mode.beatCollector1.obstacles
-        mode.jumps = mode.beatCollector1.createJumps()
+        mode.beatCollector1.createJumps()
+        mode.jumps = mode.beatCollector1.getJumps()
+        mode.beatCollector1.createSpeedMode()
+        mode.portals = mode.beatCollector1.getPortals()
+        mode.blocks = mode.beatCollector1.blocks
+        mode.collidedWithGoal = False
+        mode.isHolding = False
+        mode.keyCounter = 0
         mode.spikeImage = mode.loadImage("spike.png")
         mode.counter = 0 
         mode.timerDelay = 100
@@ -187,6 +201,8 @@ class GameMode(Mode):
         mode.coins = mode.beatCollector1.getCoins()
         mode.coinCount = 0
         mode.player = Player(mode.width//2, mode.height//2 -20, 20)
+        mode.player2 = Player(mode.width//3, mode.height//2 -20, 20)
+        mode.isSpeedMode = False
         mode.scrollX = 0 
         mode.isPaused = False
         mode.ground = Ground(mode.width//2, mode.height, mode.width//2, mode.width//4)
@@ -198,10 +214,15 @@ class GameMode(Mode):
     def restart(mode):
         mode.counter = 0
         mode.score = 0
+        mode.collidedWithGoal = False
         mode.platforms = mode.beatCollector1.getPlatforms()
         mode.obstacles = mode.beatCollector1.obstacles
         mode.coins = mode.beatCollector1.getCoins()
+        mode.portals = mode.beatCollector1.getPortals()
+        mode.coinCount = 0
+        mode.goalCounter = 0
         mode.gameOver = False
+        mode.isSpeedMode = False
         mode.audioTest = AudioCollector()
         mode.audioTest.pyaudioFlag.append(mode.gameOver)
         global streamThread
@@ -209,9 +230,16 @@ class GameMode(Mode):
         streamThread.start()
         print(len(threads))
         mode.player.x, mode.player.y = mode.width//2, mode.height//2
+        mode.player2.x, mode.player2.y = mode.width//3, mode.height//2
         mode.scrollX = 0 
-        mode.player = Player(mode.width//2, mode.height//2 -20, 20)
+        #mode.player = Player(mode.width//2, mode.height//2 -20, 20)
         GameMode.Attempts +=1 
+
+    def resetObjects(mode):
+        mode.obstacles = mode.beatCollector1.obstacles
+        mode.platforms = mode.beatCollector1.getPlatforms()
+        mode.coins = mode.beatCollector1.getCoins()
+        mode.jumps = mode.beatCollector1.getJumps()
 
          
      
@@ -220,62 +248,118 @@ class GameMode(Mode):
         if (mode.gameOver):
             return 
         if (mode.counter >= 3000 and mode.counter %1000 == 0):
-            mode.score += 5
+            mode.score += 5            
         mode.counter += mode.timerDelay
         mode.update()
         mode.clearScreen()
-        mode.checkCollisions()
+        mode.checkCollisions(mode.player)
+        #mode.checkCollisions(mode.player2)
 
     def update(mode):
-        velocityReducer = 8
-        if (mode.counter >= 3000):
+        if (mode.goal.x - mode.goal.width - mode.scrollX >= 400 and mode.goal.x + mode.goal.width - mode.scrollX <= 500):
+            if (mode.collidedWithGoal):
+                mode.goalCounter += mode.timerDelay
+                mode.goal.explode()
+            mode.scrollX = mode.scrollX
+        
+        elif (mode.counter >= 3000):
             mode.scrollX += mode.scrollSpeed
-        if (mode.player.vy > 0): 
+        if (mode.goalCounter >= 2000):
+            mode.gameOver = True
+            mode.audioTest.pyaudioFlag[1] = True
+            mode.audioTest.pyaudioFlag[0] = False
+            mode.app.setActiveMode(mode.app.wonMode)
+        if (mode.player.y - mode.player.size <= 0 ): # can't go up off the screen
+            mode.player.y = mode.player.size
+        if (mode.player2.y - mode.player2.size <= 0):
+             mode.player2.y = mode.player2.size
+        if (mode.player.vy > 0 ): 
             mode.player.vy += GameMode.GRAVITY 
+            
             mode.player.isFalling = True
         elif (not mode.player.isOnPlatform and mode.player.vy <= 0):
             mode.player.vy -= -GameMode.GRAVITY 
             ## have to make sure can't go through when holding up key
             # add more conditions to case on previous state to current state 
-        for platform in mode.platforms:
-            if (not mode.player.isJumping and (mode.isOnTopOfPlatform(platform) or mode.isOnTopOfGround())):
+        if (mode.player2.vy > 0):
+            mode.player2.vy += GameMode.GRAVITY
+        elif (not mode.player2.isOnPlatform and mode.player2.vy <= 0):
+            mode.player2.vy -= -GameMode.GRAVITY 
+        if (mode.isOnTopOfGround(mode.player)):
+            if (not mode.player.isJumping):
                 mode.player.isOnPlatform = True 
                 mode.player.vy = 0
                 mode.player.isFalling = False
             else: 
                 mode.player.isFalling = True
                 mode.player.isOnPlatform = False
-        
+        if (mode.isOnTopOfGround(mode.player2)):
+            if (not mode.player2.isJumping):
+                mode.player2.isOnPlatform = True 
+                mode.player2.vy = 0
+                mode.player2.isFalling = False
+            else: 
+                mode.player2.isFalling = True
+                mode.player2.isOnPlatform = False
+        for platform in mode.platforms:
+            if (not mode.player.isJumping and (mode.isOnTopOfPlatform(platform,mode.player) or mode.isOnTopOfGround(mode.player))):
+                mode.player.isOnPlatform = True 
+                mode.player.vy = 0
+                mode.player.isFalling = False
+            else: 
+                mode.player.isFalling = True
+                mode.player.isOnPlatform = False
+        for platform in mode.platforms:
+            if (not mode.player2.isJumping and (mode.isOnTopOfPlatform(platform, mode.player2) or mode.isOnTopOfGround(mode.player2))):
+                mode.player2.isOnPlatform = True 
+                mode.player2.vy = 0
+                mode.player2.isFalling = False
+            else: 
+                mode.player2.isFalling = True
+                mode.player2.isOnPlatform = False
+
         mode.player.y += mode.player.vy 
-        
-
         mode.player.x += mode.player.vx 
-        for platform in mode.platforms:
-            if (mode.player.collidesWith(platform,mode)):
-                if(mode.player.vy > 30):
-                    mode.player.vy -= velocityReducer
-                mode.player.y -= mode.player.vy  
-        if (mode.player.collidesWith(mode.ground, mode)):
-            if(mode.player.vy > 30):
-                    mode.player.vy -= velocityReducer
-            mode.player.y -= mode.player.vy
+        mode.player2.y += mode.player2.vy 
+        mode.player2.x += mode.player2.vx 
+        mode.fallProperly(mode.player)
+        mode.fallProperly(mode.player2)
     
-
-    def movePlayer(mode,dx,dy):
-        mode.player.x += dx 
-        mode.player.y += dy
-        if (mode.player.collidesWith(mode.ground,mode)):
-            mode.player.x -= dx 
-            mode.player.y -= dy
-            
-    def checkCollisions(mode):
-        if (mode.player.collidesWith(mode.goal,mode)):
-            mode.gameOver = True
-            mode.audioTest.pyaudioFlag[1] = True
-            mode.audioTest.pyaudioFlag[0] = False
-            mode.app.setActiveMode(mode.app.wonMode)
+    def fallProperly(mode,player):
+        velocityReducer = 8
         for platform in mode.platforms:
-            if (mode.player.collidesWith(platform,mode)):
+            if (player.collidesWith(platform,mode)):
+                if(player.vy > 20):
+                    player.vy -= velocityReducer
+                player.y -= player.vy  
+        if (player.collidesWith(mode.ground, mode)):
+            if(player.vy > 30):
+                    player.vy -= velocityReducer
+            player.y -= player.vy
+
+    def movePlayer(mode,player,dx,dy):
+        player.x += dx 
+        player.y += dy
+        if (player.collidesWith(mode.ground,mode)):
+            player.x -= dx 
+            player.y -= dy
+
+    def changeSpeed(mode):
+        GameMode.GRAVITY = 10
+        mode.scrollSpeed *= 2
+            
+    def checkCollisions(mode,player):
+        if (player.collidesWith(mode.goal,mode)):
+            print(mode.collidedWithGoal)
+            mode.collidedWithGoal = True
+        for portal in mode.portals: 
+            if (player.collidesWith(portal,mode)):
+                if (isinstance(portal, OnPortal)):
+                    portal.turnOnSpeed(mode)
+                elif (isinstance(portal, OffPortal)):
+                    portal.turnOffSpeed(mode)
+        for platform in mode.platforms:
+            if (player.collidesWith(platform,mode)):
                 print(mode.player.x, mode.player.y)
                 print(platform.y)
                 mode.gameOver = True
@@ -283,67 +367,105 @@ class GameMode(Mode):
                 mode.audioTest.pyaudioFlag[1] = True
                 mode.restart()        
         for obstacle in mode.obstacles:
-            if (mode.player.collidesWith(obstacle,mode)):
+            if (player.collidesWith(obstacle,mode)):
                mode.gameOver = True
                mode.audioTest.pyaudioFlag[1] = True
                mode.audioTest.pyaudioFlag[0] = False
                mode.restart()     
         newCoins = set() 
         for coin in mode.coins: 
-            if (mode.player.collidesWith(coin,mode)):
+            if (player.collidesWith(coin,mode)):
                 mode.coinCount += 1
             else:
                 newCoins.add(coin)
         mode.coins = newCoins
-
+        #for block in mode.blocks:
+           # if (player.collidesWith(block,mode)):
+               # mode.gameOver = True
+                #mode.audioTest.pyaudioFlag[1] = True
+                #mode.audioTest.pyaudioFlag[0] = False
+                #mode.restart() 
         for jump in mode.jumps: 
-            if (mode.player.collidesWith(jump, mode)):
-                mode.player.vy = -50
+            if (player.collidesWith(jump, mode)):
+                player.vy = -50
 
-    def isOnTopOfGround(mode): # keep player on top of the ground
+    def isOnTopOfGround(mode,player): # keep player on top of the ground
         margin = mode.player.size//4
         (gx0, gy0, gx1, gy1)= mode.ground.getBounds()
-        (Px0, Py0, Px1, Py1) = playerBounds = mode.player.getBounds()
+        (Px0, Py0, Px1, Py1) = playerBounds = player.getBounds()
         if (not mode.boundsIntersect((gx0, gy0, gx1, gy1),(Px0, Py0, Px1, Py1))):
-            if (Px0 >= gx0  and Px1 <= gx1 and Py1 <= gy0 and Py1 > gy0 - mode.player.size - 10): 
+            if (Px0 >= gx0  and Px1 <= gx1 and Py1 <= gy0 and Py1 > gy0 - player.size): 
                 return True
         return False
 
-    def isOnTopOfPlatform(mode,platform): # keep player on top of the platform 
+    def isOnTopOfPlatform(mode,platform,player): # keep player on top of the platform 
         (platx0, platy0, platx1, platy1)= platform.getBounds(mode)
-        (Px0, Py0, Px1, Py1) = playerBounds = mode.player.getBounds()
+        (Px0, Py0, Px1, Py1) = playerBounds = player.getBounds()
         if (not mode.boundsIntersect((platx0, platy0, platx1, platy1),(Px0, Py0, Px1, Py1))):
-            if (Px0 >= platx0 - mode.player.size and Px1 <= platx1 + mode.player.size and Py1 <= platy0 and Py1 > platy0 - mode.player.size): 
+            if (Px0 >= platx0 - mode.player.size and Px1 <= platx1 + player.size and Py1 <= platy0 and Py1 > platy0 - player.size): 
                 return True
         return False
+    
 
     def keyPressed(mode,event):
         if (mode.gameOver or mode.counter < 3000):
             return 
+        if (event.key == "d"):
+            mode.movePlayer(mode.player2,+5,0)
+            mode.player2.isMoving = True 
+            mode.player2.vx = 5
+        elif (event.key == "a"):
+            mode.movePlayer(mode.player2,-5,0)
+            mode.player2.isMoving = True 
+            mode.player2.vx = -5
+        elif (event.key == "w"):
+            
+            mode.keyCounter += mode.timerDelay
+            if (mode.keyCounter >= 1000):
+                mode.isHolding = True
+            
+            mode.player2.isJumping = True
+            mode.player2.vy = -25      
         if (event.key == "Right"):
-            mode.movePlayer(+5,0)
+            mode.movePlayer(mode.player,+5,0)
             mode.player.isMoving = True 
             mode.player.vx = 5
         elif (event.key == "Left"):
-            mode.movePlayer(-5,0)
+            mode.movePlayer(mode.player,-5,0)
             mode.player.isMoving = True 
             mode.player.vx = -5
         elif (event.key == "Up"):
+            
+            mode.keyCounter += mode.timerDelay
+            if (mode.keyCounter >= 1000):
+                mode.isHolding = True
+            
             mode.player.isJumping = True
-            mode.player.vy = -20
+            mode.player.vy = -25
             
         elif (event.key == "S"): # speed up scrolling to see rest of level
             mode.scrollX += 1000
+        elif (event.key == "W"):
+            mode.scrollX = mode.goal.x - 1000
         elif (event.key == "Escape"):
             mode.isPaused = True
             mode.audioTest.pyaudioFlag[0] = False
             mode.app.setActiveMode(mode.app.splashScreenMode)
 
     def keyReleased(mode,event):
+        if (event.key == "d" or event.key == "a"):
+            mode.player2.isMoving = False 
+            mode.player2.vx = 0
+        elif (event.key == "w"):
+            mode.keyCounter = 0
+            mode.isHolding = False
+            mode.player2.isJumping = False
         if (event.key == "Right" or event.key == "Left"):
             mode.player.isMoving = False 
             mode.player.vx = 0
         elif (event.key == "Up"):
+            mode.keyCounter = 0
+            mode.isHolding = False
             mode.player.isJumping = False
 
             # "gravity", have to create floor and collisions to stop momentum
@@ -389,22 +511,45 @@ class GameMode(Mode):
         canvas.create_text(100, 50, text = f"Attempts: {GameMode.Attempts}", font = "Lato 16")
         canvas.create_rectangle(mode.player.x - mode.player.size , mode.player.y - mode.player.size , 
                             mode.player.x + mode.player.size , mode.player.y + mode.player.size )
+        canvas.create_rectangle(mode.player2.x - mode.player2.size , mode.player2.y - mode.player2.size , 
+                            mode.player2.x + mode.player2.size , mode.player2.y + mode.player2.size, fill = "red" )
         canvas.create_rectangle(mode.ground.x - mode.ground.width, mode.ground.y - mode.ground.height, 
                                mode.ground.x + mode.ground.width, mode.ground.y + mode.ground.height, fill = "black")
+        for portal in mode.portals:
+            if (portal.x - portal.width - mode.scrollX >= 0 and portal.x + portal.width - mode.scrollX <= 500):
+                portal.draw(canvas,mode)
+        if (mode.isSpeedMode):
+            for block in mode.blocks:
+                block.draw(canvas,mode)
+                mode.platforms = []
+                mode.obstacles = []
+                mode.jumps = []
+        else: 
+            mode.resetObjects()
+        
         for platform in mode.platforms: # draw only when seen on screen
             if (platform.x - platform.width - mode.scrollX >= 0 and platform.x + platform.width - mode.scrollX <= 500):
-                canvas.create_rectangle(platform.x - platform.width - mode.scrollX, platform.y - platform.height, 
-                                    platform.x + platform.width - mode.scrollX, platform.y + platform.height)
-        canvas.create_oval(mode.goal.x - mode.goal.r - mode.scrollX, mode.goal.y - mode.goal.r ,
-                        mode.goal.x + mode.goal.r - mode.scrollX, mode.goal.y + mode.goal.r , fill = "red")
+                #canvas.create_rectangle(platform.x - platform.width - mode.scrollX, platform.y - platform.height, 
+                                   # platform.x + platform.width - mode.scrollX, platform.y + platform.height)
+                canvas.create_image(platform.x - mode.scrollX, platform.y, image = ImageTk.PhotoImage(platform.image))
+        canvas.create_rectangle(mode.goal.x - mode.goal.width - mode.scrollX, mode.goal.y - mode.goal.height, 
+                                    mode.goal.x + mode.goal.width - mode.scrollX, mode.goal.y + mode.goal.height, fill = mode.goal.color)
         for obstacle in mode.obstacles:
             if (obstacle.x - obstacle.width - mode.scrollX >= 0 and obstacle.x + obstacle.width - mode.scrollX <= 500):
                 obstacle.draw(canvas, mode)
         for jump in mode.jumps:
-            jump.draw(canvas,mode)
+            if (jump.x - jump.width - mode.scrollX >= 0 and jump.x + jump.width - mode.scrollX <= 500):
+                jump.draw(canvas,mode)
         for coin in mode.coins:
             if (coin.x - coin.width - mode.scrollX >= 0 and coin.x + coin.width - mode.scrollX <= 500):
                 coin.draw(canvas,mode)
+       
+        for dot in mode.goal.dots:
+            if (mode.collidedWithGoal):
+                canvas.create_oval(dot.x - dot.r - mode.scrollX, dot.y - dot.r, 
+                                    dot.x + dot.r - mode.scrollX, dot.y + dot.r, fill = dot.color)
+        if (mode.collidedWithGoal):
+            canvas.create_image(mode.width//2, mode.height//5, image = ImageTk.PhotoImage(GameMode.complete))
 
 
 class SplashScreenMode(Mode):
@@ -429,9 +574,10 @@ class SplashScreenMode(Mode):
     def mousePressed(mode,event):
         if (mode.mouseInBounds(event.x, event.y, mode.playButton.getBounds())):
             mode.app.gameMode.isPaused = False
+            mode.app.appStarted()
             mode.app.setActiveMode(mode.app.gameMode)
 
-
+# level select mode
 
 
 class GameOverMode(Mode):
@@ -445,35 +591,47 @@ class GameOverMode(Mode):
             
 
 class WonMode(Mode):
-    def appStarted(mode):
+    def modeActivated(mode):
         mode.highScore = mode.getScore("score.txt")
-        mode.stars = []
-        print(mode.app.gameMode.coinCount)
+        mode.stars = [Star(mode.width//2 - 30, mode.height//2 + 100, Star.outlineImage, (30,30)),
+                        Star(mode.width//2, mode.height//2 + 100, Star.outlineImage, (30,30)),
+                        Star(mode.width//2 + 30, mode.height//2 + 100, Star.outlineImage, (30,30))]
+        print("Coin Count" + str(mode.app.gameMode.coinCount))
         if (mode.app.gameMode.coinCount == 1):
-            mode.stars = [Star(mode.width//2 - 30, mode.height//2 + 100, Star.image, (30,30))]
+            mode.stars[0].image = Star.colorImage
+            mode.stars[0].resize()
         elif (mode.app.gameMode.coinCount == 2):
-            mode.stars = [Star(mode.width//2 - 30, mode.height//2 + 100, Star.image, (30,30))]
-            mode.stars.append(Star(mode.width//2 , mode.height//2 + 100, Star.image, (30,30)))
+            mode.stars[0].image = Star.colorImage
+            mode.stars[0].resize()
+            mode.stars[1].image = Star.colorImage
+            mode.stars[1].resize()
         elif (mode.app.gameMode.coinCount == 3):
-            mode.stars = [Star(mode.width//2 - 30, mode.height//2 + 100, Star.image, (30,30))]
-            mode.stars.append(Star(mode.width//2 , mode.height//2 + 100, Star.image, (30,30)))
-            mode.stars.append(Star(mode.width//2 + 30, mode.height//2 + 100, Star.image, (30,30)))
+            mode.stars[0].image = Star.colorImage
+            mode.stars[1].resize()
+            mode.stars[1].image = Star.colorImage
+            mode.stars[1].resize()
+            mode.stars[2].image = Star.colorImage
+            mode.stars[2].resize()
         print(len(mode.stars))
 
     def redrawAll(mode,canvas):
+        canvas.create_image(mode.width//2, mode.height//5, image = ImageTk.PhotoImage(GameMode.complete))
         canvas.create_text(mode.width//2, mode.height//2, text = "You Won!", font = "Lato 20")
         canvas.create_text(mode.width//2, mode.height//2 + 40, text = f"Score: {mode.app.gameMode.score}", font = "Lato 20")
         canvas.create_text(mode.width//2, mode.height//2 + 60, text = f"High Score: {mode.highScore}", font = "Lato 20")
         canvas.create_text(mode.width//2, mode.height//2 + 20, text = "Press r to restart!", font = "Lato 16")
         for star in mode.stars:
             star.draw(canvas)
+    def resetScore(mode,path):
+        with open(path, "wt") as file: 
+            file.write("0")
+
     def keyPressed(mode,event):
         if (event.key == "r"):
-            mode.updateScore("score.txt")
-            #mode.app.gameMode.appStarted()
+            mode.updateScore("score.txt")        
+            GameMode.Attempts = 1
             mode.app.setActiveMode(mode.app.splashScreenMode)
-    def modeDeactivated(mode):
-        mode.app.gameMode.restart()
+
 
     # modeled after functions in https://www.cs.cmu.edu/~112/notes/notes-strings.html#basicFileIO
     def getScore(mode,path):
@@ -492,6 +650,7 @@ class beatModalApp(ModalApp):
         #self.gameMode.pyaudioFlag[0] = False
     def appStopped(self):
         self.gameMode.audioTest.pyaudioFlag[0] = False
+        self.wonMode.resetScore("score.txt")
     def appStarted(self):
         self.gameMode = GameMode() 
         self.wonMode = WonMode()

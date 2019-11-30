@@ -8,6 +8,7 @@ from Surface import Surface
 from GameObject import GameObject
 from tkinter import *
 from PIL import Image
+from Portal import Portal, OnPortal, OffPortal
 import numpy as np
 from numpy import median, diff
 
@@ -31,6 +32,15 @@ class Coin(GameObject):
     def __init__(self,x,y,image, size):
         super().__init__(x,y,size)
         self.image = Coin.image.resize(size)
+
+
+class Block(GameObject):
+    image = Image.open("BeamBlock06.png")
+    def __init__(self,x,y,image, size):
+        super().__init__(x,y,size)
+        self.image = Block.image.resize(size)
+
+
 class BeatCollector(object):
     
     def __init__(self, fileName, samplingRate):
@@ -46,8 +56,10 @@ class BeatCollector(object):
         self.obstacles = []
         self.jumps = []
         self.coins = set()
+        self.portals = set() 
+        self.blocks = set()
         self.goal = None
-        self.defaultGap = 50
+        self.defaultGap = 35
         self.bpm = self.beats_to_bpm()
         self.scrollSpeed = int((self.bpm/60) *10)
         self.height = 500
@@ -94,8 +106,7 @@ class BeatCollector(object):
         for i in range(len(beats)):
             if (i == len(beats) - 1):
                 beats[i] += beats[i-1] + 30
-                self.platforms.append(Surface(beats[i], defaultY, 30, 10))
-                self.goal = Goal(beats[i], defaultY, 50)
+                self.goal = Goal(beats[i], 200, 20, self.height * (2/3))
             elif (i == 0):
                 beats[i] += 500 
                 self.platforms.append(Surface(beats[i], defaultY, 30, 10))
@@ -103,8 +114,8 @@ class BeatCollector(object):
                 platY = defaultY
                 timeDif = beats[i+1] - beats[i]
                 platWidth = round(timeDif * self.scrollSpeed,2)
-                platWidth *= 2 # how wide the platform is based on how fast the scrolling is and time dif
-                spikeSize = int(platWidth * 2)
+                platWidth *= 4 # how wide the platform is based on how fast the scrolling is and time dif
+                spikeSize = int(platWidth)
                 beats[i] = round(beats[i-1] + platWidth) + self.defaultGap*2
                 # add descending and ascending platforms
                 if (volumes[i+1] > volumes[i]):
@@ -114,25 +125,52 @@ class BeatCollector(object):
                 if (platY >= groundHeight):
                     platY = self.platforms[i-1].y - 50 
                     self.obstacles.append(Spike(beats[i], platY - 35, Spike.image, (spikeSize,spikeHeight)))
-                    newX = ((beats[i]+1 + beats[i+1])/2) + self.defaultGap + platWidth
-                    self.obstacles.append(Spike(newX, 375 - spikeHeight/2, Spike.image, (spikeSize, spikeHeight)))
+                    newX = (beats[i-1] + beats[i])//2
+                    print(newX)
+                    newSpikeY = 375 - spikeHeight/2
+                    self.obstacles.append(Spike(newX, newSpikeY , Spike.image, (spikeSize, spikeHeight)))
+                    self.jumps.append(JumpPad(newX, groundHeight - 30 - 15, JumpPad.image, (30,30) ))
                 if (i %10 == 0 ):
                     spikeHeight = int(abs(volumes[i])* 10)
                     if spikeHeight > 50 or spikeHeight < 10:
                         spikeHeight = 30
                     self.obstacles.append(Spike(beats[i], platY - 35, Spike.image, (spikeSize,spikeHeight)))
-                self.platforms.append(Surface(beats[i], platY, platWidth, 10))
+                self.platforms.append(Surface(beats[i], platY, platWidth, 20))
     def createJumps(self):
         beats, volumes = self.collectBeats()
         groundHeight = 375
-        for i in range(len(beats)-1):
+    
+        for i in range(len(self.platforms)-1):
             if i == 0: 
-                self.jumps.append(JumpPad(beats[i], 280, JumpPad.image, (30,30)))
-            elif (i==5):
-                jumpX = (beats[i] + beats[i+1])//2
+                pass
+                #self.jumps.append(JumpPad(beats[i], 280, JumpPad.image, (30,30)))
+            elif (self.platforms[i].y - self.platforms[i-1].y < -20 ):
+                #print('hi')
+                jumpX = (beats[i+1] + beats[i])//2
                 jumpY = random.randint(325, 350)
+                #print(jumpX, jumpY)
                 self.jumps.append(JumpPad(jumpX, jumpY, JumpPad.image, (30,30)))
-        return self.jumps
+        
+    
+    def createSpeedMode(self):
+        third = len(self.platforms)//3
+        half = len(self.platforms)//2
+        print("Portal: " + str(self.platforms[third].x))
+        self.portals.add(OnPortal(self.platforms[third].x+ self.defaultGap, self.height//5, Portal.image, (50,50)))
+        seenX = set()
+        seenY = set()
+        for _ in range(half - third):
+            
+            while True: 
+                blockX = random.randint(self.platforms[third].x + 100,self.platforms[half].x)
+                blockY = random.randint(50, 300)
+                if blockX not in seenX and blockY not in seenY: 
+                    self.blocks.add(Block(blockX,blockY, Block.image,(30,30)))
+                    seenX.add(blockX)
+                    seenY.add(blockY)
+                    break
+        self.portals.add(OffPortal(self.platforms[half].x, self.height//5, Portal.image, (50,50)))
+
 
     def createCoins(self):
         beats, volumes = self.collectBeats() 
@@ -154,7 +192,12 @@ class BeatCollector(object):
                     self.coins.add(Coin(beats[i], self.platforms[i].y - 100, Coin.image, (50,50)))
         for coin in self.coins:
             print(coin.x)
-                
+
+    def getJumps(self):
+        return self.jumps
+    
+    def getPortals(self):
+        return self.portals
     
     def getPlatforms(self):
         return self.platforms
@@ -163,14 +206,36 @@ class BeatCollector(object):
     def getCoins(self):
         return self.coins
 
-class Goal(object):
-    def __init__(self, x, y, r): 
+class Dot(object):
+    def __init__(self,x,y,r,color):
+        self.x = x
+        self.y = y
+        self.r = r 
+        self.color = color 
+        self.dx = random.randint(-30, -20) 
+        self.dy = random.randint(-30,40)
+    def move(self):
+        self.x += self.dx
+        self.y += self.dy
+
+class Goal(object): # make goal into cyan rectangle, with animation
+    # explode method to show level complete screen
+    def __init__(self, x, y, width, height): 
         self.x = x 
         self.y = y 
-        self.r = r
+        self.width = width
+        self.height = height
+        self.color = "cyan"
+        self.dots = [Dot(self.x, self.y, random.randint(5,20), random.choice(["yellow", "red", "blue"])) for _ in range(20)]
+
+    def explode(self):
+        for dot in self.dots:
+            dot.move()
+
+
     def getBounds(self,app):
-        (x0,y0,x1,y1) = (self.x - self.r - app.scrollX, self.y - self.r, 
-                               self.x + self.r - app.scrollX, self.y + self.r)
+        (x0,y0,x1,y1) = (self.x - self.width - app.scrollX, self.y - self.height, 
+                               self.x + self.width - app.scrollX, self.y + self.height)
         return (x0,y0,x1,y1)
 
 class LevelApp(App):
