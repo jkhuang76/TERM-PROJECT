@@ -12,6 +12,7 @@ from Portal import Portal, OnPortal, OffPortal
 from Level_Generation import BeatCollector 
 from Level_Generation import Coin
 from tkinter import *
+from tkinter import font
 from PIL import Image
 import numpy as np
 from numpy import diff, median
@@ -161,12 +162,17 @@ class GameMode(Mode):
     background = Image.open("bg-banner2.jpg")
     complete = Image.open("levelComplete2.png")
     complete = complete.resize((500,100))
+    started = False
+    count = 0 
     @staticmethod
     def distance(x1,y1,x2,y2):
         return ((x2-x1)**2 + (y2-y1)**2)**0.5
     
     
     def appStarted(mode):
+        GameMode.Attempts = 1
+        GameMode.count += 1
+        GameMode.started = True
         mode.pyaudioFlag = [True]
         mode.gameOver = False
         #mode.pyaudioFlag.append(mode.gameOver)
@@ -176,7 +182,8 @@ class GameMode(Mode):
         streamThread = threading.Thread(target=mode.audioTest.pyaudio_stream_thread, args=(mode.audioTest.pyaudioFlag,))
         streamThread.start()
         threads.append(streamThread)
-        mode.beatCollector1 = BeatCollector("Another One Bites The Dust.wav", 48000)
+        #mode.beatCollector1 = BeatCollector("Another One Bites The Dust.wav", 48000)
+        mode.beatCollector1 = BeatCollector(mode.app.levelSelectMode.filename, int(mode.app.levelSelectMode.samplerate))
         mode.bpm = mode.audioTest.beats_to_bpm()
         mode.scrollSpeed = int((mode.bpm/60) * 10)  # beats per second then multiplied based on timerDelay
         beatsTime = mode.beatCollector1.collectBeats()
@@ -208,7 +215,8 @@ class GameMode(Mode):
         mode.ground = Ground(mode.width//2, mode.height, mode.width//2, mode.width//4)
     def appStopped(mode):
         mode.pyaudioFlag[0] = False
-        
+    def modeDeactivated(mode):
+        GameMode.started = False
 
     
     def restart(mode):
@@ -222,6 +230,7 @@ class GameMode(Mode):
         mode.coinCount = 0
         mode.goalCounter = 0
         mode.gameOver = False
+        mode.isPaused = False
         mode.isSpeedMode = False
         mode.audioTest = AudioCollector()
         mode.audioTest.pyaudioFlag.append(mode.gameOver)
@@ -232,7 +241,8 @@ class GameMode(Mode):
         mode.player.x, mode.player.y = mode.width//2, mode.height//2
         mode.player2.x, mode.player2.y = mode.width//3, mode.height//2
         mode.scrollX = 0 
-        #mode.player = Player(mode.width//2, mode.height//2 -20, 20)
+        mode.player = Player(mode.width//2, mode.height//2 -20, 20)
+        mode.player2 = Player(mode.width//3, mode.height//2 -20, 20)
         GameMode.Attempts +=1 
 
     def resetObjects(mode):
@@ -273,17 +283,21 @@ class GameMode(Mode):
             mode.player.y = mode.player.size
         if (mode.player2.y - mode.player2.size <= 0):
              mode.player2.y = mode.player2.size
+        if (mode.isSpeedMode):
+            mode.player.vy = 0
+            mode.player2.vy = 0
         if (mode.player.vy > 0 ): 
             mode.player.vy += GameMode.GRAVITY 
             
             mode.player.isFalling = True
-        elif (not mode.player.isOnPlatform and mode.player.vy <= 0):
+        
+        elif (not mode.isSpeedMode and (not mode.player.isOnPlatform and mode.player.vy <= 0)):
             mode.player.vy -= -GameMode.GRAVITY 
             ## have to make sure can't go through when holding up key
             # add more conditions to case on previous state to current state 
         if (mode.player2.vy > 0):
             mode.player2.vy += GameMode.GRAVITY
-        elif (not mode.player2.isOnPlatform and mode.player2.vy <= 0):
+        elif (not mode.isSpeedMode and not mode.player2.isOnPlatform and mode.player2.vy <= 0):
             mode.player2.vy -= -GameMode.GRAVITY 
         if (mode.isOnTopOfGround(mode.player)):
             if (not mode.player.isJumping):
@@ -380,11 +394,11 @@ class GameMode(Mode):
                 newCoins.add(coin)
         mode.coins = newCoins
         #for block in mode.blocks:
-           # if (player.collidesWith(block,mode)):
-               # mode.gameOver = True
-                #mode.audioTest.pyaudioFlag[1] = True
-                #mode.audioTest.pyaudioFlag[0] = False
-                #mode.restart() 
+            #if (player.collidesWith(block,mode)):
+              # mode.gameOver = True
+               # mode.audioTest.pyaudioFlag[1] = True
+               # mode.audioTest.pyaudioFlag[0] = False
+               # mode.restart() 
         for jump in mode.jumps: 
             if (player.collidesWith(jump, mode)):
                 player.vy = -50
@@ -423,9 +437,11 @@ class GameMode(Mode):
             mode.keyCounter += mode.timerDelay
             if (mode.keyCounter >= 1000):
                 mode.isHolding = True
-            
-            mode.player2.isJumping = True
-            mode.player2.vy = -25      
+            if (mode.isSpeedMode):
+                mode.movePlayer(mode.player2, 0,-5)
+            else:
+                mode.player2.isJumping = True
+                mode.player2.vy = -25      
         if (event.key == "Right"):
             mode.movePlayer(mode.player,+5,0)
             mode.player.isMoving = True 
@@ -439,9 +455,11 @@ class GameMode(Mode):
             mode.keyCounter += mode.timerDelay
             if (mode.keyCounter >= 1000):
                 mode.isHolding = True
-            
-            mode.player.isJumping = True
-            mode.player.vy = -25
+            if (mode.isSpeedMode):
+                mode.movePlayer(mode.player,0,-5)
+            else: 
+                mode.player.isJumping = True
+                mode.player.vy = -25
             
         elif (event.key == "S"): # speed up scrolling to see rest of level
             mode.scrollX += 1000
@@ -519,8 +537,10 @@ class GameMode(Mode):
             if (portal.x - portal.width - mode.scrollX >= 0 and portal.x + portal.width - mode.scrollX <= 500):
                 portal.draw(canvas,mode)
         if (mode.isSpeedMode):
+            print(mode.player.vy)
             for block in mode.blocks:
-                block.draw(canvas,mode)
+                if (block.x - block.width - mode.scrollX >= 0 and block.x + block.width - mode.scrollX <= 500):
+                    block.draw(canvas,mode)
                 mode.platforms = []
                 mode.obstacles = []
                 mode.jumps = []
@@ -556,29 +576,107 @@ class SplashScreenMode(Mode):
     background = Image.open("background.png")
     title = Image.open("title2.png")
     play = Image.open("play.png")
+    level = Image.open("level2.png")
+    generator = Image.open("generator2.png")
     def appStarted(mode):
         SplashScreenMode.background = SplashScreenMode.background.resize((500,500))
-        SplashScreenMode.title = SplashScreenMode.title.resize((400,100))
-        mode.playButton = Button(mode.width//2, mode.height//2, SplashScreenMode.play.size)
+        SplashScreenMode.title = SplashScreenMode.title.resize((450,100))
+        mode.playButton = Button(mode.width//2, mode.height* (0.4), SplashScreenMode.play.size)
+        SplashScreenMode.level = SplashScreenMode.level.resize((300,80))
+        SplashScreenMode.generator = SplashScreenMode.generator.resize((450, 100))
+        ButtonSize = (SplashScreenMode.generator.width, SplashScreenMode.level.height*1.5)
+        mode.levelHeight = mode.height * (0.7)
+        mode.generatorHeight = mode.height * (0.82)
+        mode.levelButton = Button(mode.width//2, (mode.levelHeight + mode.generatorHeight)/2, ButtonSize )#font size here)
 
     def redrawAll(mode,canvas): 
         canvas.create_image(mode.width//2,mode.height//2,image = ImageTk.PhotoImage(SplashScreenMode.background))
         canvas.create_image(mode.width//2,mode.height//10,image = ImageTk.PhotoImage(SplashScreenMode.title))
-        canvas.create_image(mode.width//2,mode.height//2,image = ImageTk.PhotoImage(SplashScreenMode.play))
-
-    def mouseInBounds(mode, eventx, eventy, bounds):
+        canvas.create_image(mode.width//2,mode.height * (0.4),image = ImageTk.PhotoImage(SplashScreenMode.play))
+        
+        canvas.create_image(mode.width//2, mode.levelHeight, image = ImageTk.PhotoImage(SplashScreenMode.level))
+        canvas.create_image(mode.width//2, mode.generatorHeight, image = ImageTk.PhotoImage(SplashScreenMode.generator))
+        (x0,y0,x1,y1 ) = mode.levelButton.getBounds()
+        canvas.create_rectangle(x0,y0,x1,y1)
+    @staticmethod
+    def mouseInBounds( eventx, eventy, bounds):
         # check mouse position is inside bounds
         (x0,y0,x1,y1) = bounds
         return (eventx >= x0 and eventx <= x1 and 
                 eventy >= y0 and eventy <= y1)
     def mousePressed(mode,event):
-        if (mode.mouseInBounds(event.x, event.y, mode.playButton.getBounds())):
+        if (SplashScreenMode.mouseInBounds(event.x, event.y, mode.playButton.getBounds())):
             mode.app.gameMode.isPaused = False
-            mode.app.appStarted()
+            mode.app.gameMode.appStarted()
             mode.app.setActiveMode(mode.app.gameMode)
+        if (SplashScreenMode.mouseInBounds(event.x, event.y, mode.levelButton.getBounds())):
+            mode.app.setActiveMode(mode.app.levelSelectMode)
 
 # level select mode
+class LevelSelectMode(Mode):
+    cancel = Image.open("cancel.png")
+    instructions = Image.open("instructions.png")
+    grey = Image.open("greyButton.png")
+    grey = grey.resize((450, int(grey.height * (0.7))))
+    smallgrey = grey.resize((int(grey.width * 0.4), int(grey.height * (0.4))))
+    def appStarted(mode):
+        LevelSelectMode.cancel = LevelSelectMode.cancel.resize((60,60))
+        LevelSelectMode.instructions = LevelSelectMode.instructions.resize((400,100))
+        mode.levelHeight = mode.height//2 + LevelSelectMode.grey.height//5
+        mode.cancelButton = Button(50,50,(60,60))
+        mode.playButton = Button(mode.width//2, mode.height * (0.9), LevelSelectMode.smallgrey.size)
+        mode.levelButton = Button(mode.width//2, mode.levelHeight, LevelSelectMode.grey.size)
+        mode.filename = None
+        #mode.app.showMessage("woah")
+        mode.samplerate = None
+        mode.levelGenerated = False
 
+    #def modeActivated(mode):
+        #mode.showMessage("Please input the filename with .wav and the samplerate")
+
+        
+            
+    def mousePressed(mode,event):
+
+        if (SplashScreenMode.mouseInBounds(event.x, event.y, mode.cancelButton.getBounds())):
+            mode.app.setActiveMode(mode.app.splashScreenMode)
+        elif (SplashScreenMode.mouseInBounds(event.x,event.y, mode.levelButton.getBounds())):
+            mode.filename = mode.getUserInput("What is the Filename?")
+            mode.samplerate = mode.getUserInput("What is the samplerate?")
+            while mode.filename == None or not mode.filename.endswith(".wav"):
+                mode.filename = mode.getUserInput("The File has to end with .wav!")
+            
+            while mode.samplerate == None or not mode.samplerate.isdigit():
+                mode.samplerate = mode.getUserInput("What is the samplerate?")
+            mode.levelGenerated = True
+        elif (SplashScreenMode.mouseInBounds(event.x,event.y, mode.playButton.getBounds())):
+            mode.app.gameMode.isPaused = False
+            mode.app.setActiveMode(mode.app.gameMode)
+            print(mode.app.gameMode.count)
+            if (GameMode.count > 1):
+                mode.app.gameMode.restart()
+                GameMode.Attempts = 1
+
+    
+
+        
+    
+    def redrawAll(mode,canvas):
+        canvas.create_image(mode.width//2,mode.height//2,image = ImageTk.PhotoImage(SplashScreenMode.background))
+        canvas.create_image(50, 50, image = ImageTk.PhotoImage(LevelSelectMode.cancel))
+        canvas.create_image(mode.width//2 + LevelSelectMode.instructions.width * 0.1, mode.height * (0.1), image = ImageTk.PhotoImage(LevelSelectMode.instructions))
+        canvas.create_text(mode.width//2, LevelSelectMode.instructions.height + 50, text = """Please input your filename with .wav
+and the sampling rate (e.g. 48000, 44100 Hz)
+once you click on the button""", font = ("Open Sans Regular", 12), fill = "white")
+        
+        canvas.create_image(mode.width//2, mode.levelHeight, image = ImageTk.PhotoImage(LevelSelectMode.grey))
+        if (mode.filename != None and mode.filename.endswith(".wav")):
+            canvas.create_text(mode.width//2, mode.levelHeight, text = mode.filename, font = "Pusab 18", fill = "white")
+        if (mode.levelGenerated):
+            canvas.create_image(mode.width//2, mode.height * (0.9), image = ImageTk.PhotoImage(LevelSelectMode.smallgrey))
+            canvas.create_text(mode.width//2, mode.height * (0.9), text = "Play!", font = "Pusab 14")
+        (x0,y0,x1,y1) = mode.levelButton.getBounds()
+        canvas.create_rectangle(x0,y0,x1,y1)
 
 class GameOverMode(Mode):
     def redrawAll(mode,canvas):
@@ -607,7 +705,7 @@ class WonMode(Mode):
             mode.stars[1].resize()
         elif (mode.app.gameMode.coinCount == 3):
             mode.stars[0].image = Star.colorImage
-            mode.stars[1].resize()
+            mode.stars[0].resize()
             mode.stars[1].image = Star.colorImage
             mode.stars[1].resize()
             mode.stars[2].image = Star.colorImage
@@ -649,12 +747,14 @@ class beatModalApp(ModalApp):
        # super().__init__(width = width, height = height)
         #self.gameMode.pyaudioFlag[0] = False
     def appStopped(self):
-        self.gameMode.audioTest.pyaudioFlag[0] = False
+        if (GameMode.started):
+            self.gameMode.audioTest.pyaudioFlag[0] = False
         self.wonMode.resetScore("score.txt")
     def appStarted(self):
         self.gameMode = GameMode() 
         self.wonMode = WonMode()
         self.gameOverMode = GameOverMode()
+        self.levelSelectMode = LevelSelectMode()
         self.splashScreenMode = SplashScreenMode()
         self.setActiveMode(self.splashScreenMode)
 

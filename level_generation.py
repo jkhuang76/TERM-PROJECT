@@ -65,6 +65,10 @@ class BeatCollector(object):
         self.height = 500
         self.spikeImage = Image.open('spike.png')
 
+    @staticmethod
+    def distance(x1,y1,x2,y2):
+        return ((x2-x1)**2 + (y2-y1)**2)**0.5
+
     def collectBeats(self): # collectBeats basic idea from https://github.com/aubio/aubio/tree/master/python/demos, tempo demo
         self.music_source = aubio.source(self.fileName, self.samplingRate, self.hop_size)
         self.music_tempo = aubio.tempo("default", self.fft_size, self.hop_size, self.samplingRate)
@@ -164,7 +168,8 @@ class BeatCollector(object):
             while True: 
                 blockX = random.randint(self.platforms[third].x + 100,self.platforms[half].x)
                 blockY = random.randint(50, 300)
-                if blockX not in seenX and blockY not in seenY: 
+                if (blockX - 20 not in seenX and blockY - 20 not in seenY and 
+                    blockX + 20 not in seenX and blockY + 20 not in seenY): 
                     self.blocks.add(Block(blockX,blockY, Block.image,(30,30)))
                     seenX.add(blockX)
                     seenY.add(blockY)
@@ -179,7 +184,7 @@ class BeatCollector(object):
         for i in range(len(self.platforms)):
             if (i == (len(self.platforms)//3)):
                 if (self.platforms[i].y >= 325 ):
-                    self.coins.add(Coin(beats[i], 100, Coin.image, (50,50)))
+                    self.coins.add(Coin(beats[i], self.height* (2/5), Coin.image, (50,50)))
                 else: 
                     self.coins.add(Coin(beats[i], 150, Coin.image, (50,50)))
             elif (i == int(len(self.platforms)* (2/3))):
