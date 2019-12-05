@@ -1,6 +1,6 @@
-from PIL import Image
+from PIL import Image # Pillow image manipulation https://pillow.readthedocs.io/en/stable/reference/Image.html
 class Surface(object): #surfaces - "ground", platforms, rectangles
-    image = Image.open("RegularPlatform01.png")
+    image = Image.open("Images/RegularPlatform01.png")
     def __init__(self, x, y, width, height):
         self.x = x 
         self.y = y 
